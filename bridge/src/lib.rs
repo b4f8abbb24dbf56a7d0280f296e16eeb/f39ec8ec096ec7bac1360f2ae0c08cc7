@@ -1,5 +1,6 @@
 //! Small byte-in/byte-out adapter to unmodified nxkit. No filesystem or native host.
-use nxb_image::{image, layout, manifest, npdm};
+mod image;
+use image::{layout, manifest, npdm};
 use nxb_pyjson::{Value as J, dumps, parse};
 
 mod extract;
@@ -301,11 +302,11 @@ fn build_runfolder(input: &J) -> Result<J> {
     for (m, _) in mods {
         files.push(file(
             format!("modules/{}.imports.json", m.name),
-            m.imports_json().as_bytes(),
+            manifest::imports_json(&m.symbols.imports).as_bytes(),
         ));
         files.push(file(
             format!("modules/{}.exports.json", m.name),
-            m.exports_json().as_bytes(),
+            manifest::symbols_json(&m.symbols.exports).as_bytes(),
         ));
         files.push(file(format!("modules/{}.bin", m.name), &m.image));
         files.push(file(

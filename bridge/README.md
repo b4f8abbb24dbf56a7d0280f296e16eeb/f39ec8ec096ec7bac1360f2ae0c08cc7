@@ -3,6 +3,12 @@
 Fresh adapter to the exact unmodified nxkit source staged by `scripts/source.mjs`.
 It does not provide an iOS application host or establish game compatibility.
 
+Image construction compiles the pinned `nxb-build` standalone source modules directly.
+Native and browser builds use the same rewrite, layout, manifest and Mach-O code.
+The bridge calls the loader-based rewrite helper and byte writers, not the included
+filesystem or native-signing helpers. Update the paths in `src/image.rs` if these
+internal modules move upstream.
+
 Exports: `memory`, `nx2ipa_abi_version()` (1), `nx2ipa_alloc(length)`,
 `nx2ipa_dealloc(pointer,length)`, `nx2ipa_call(pointer,length)`.
 The call result is a u64: output pointer in the high 32 bits, length in the low

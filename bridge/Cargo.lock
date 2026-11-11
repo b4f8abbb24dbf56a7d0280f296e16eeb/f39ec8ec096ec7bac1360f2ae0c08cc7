@@ -52,8 +52,9 @@ version = "0.1.0"
 dependencies = [
  "air-front",
  "nxb-extract",
- "nxb-image",
+ "nxb-model",
  "nxb-pyjson",
+ "nxb-rewrite",
  "nxb-shader",
  "nxb-split",
  "nxb-xlate",
@@ -89,16 +90,6 @@ dependencies = [
  "nxb-pyjson",
  "nxb-split",
  "nxb-sys",
-]
-
-[[package]]
-name = "nxb-image"
-version = "0.10.0"
-dependencies = [
- "nxb-model",
- "nxb-pyjson",
- "nxb-rewrite",
- "nxtitle",
 ]
 
 [[package]]

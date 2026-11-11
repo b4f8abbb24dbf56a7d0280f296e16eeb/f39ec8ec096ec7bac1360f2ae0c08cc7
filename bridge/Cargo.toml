@@ -8,7 +8,8 @@ license = "GPL-3.0-only"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-nxb-image = { path = "../.build/nxkit/crates/nxb-image" }
+nxb-model = { path = "../.build/nxkit/crates/nxb-model" }
+nxb-rewrite = { path = "../.build/nxkit/crates/nxb-rewrite" }
 nxb-pyjson = { path = "../.build/nxkit/crates/nxb-pyjson" }
 nxtitle = { path = "../.build/nxkit/titles/nxtitle" }
 nxb-split = { path = "../.build/nxkit/crates/nxb-split" }
