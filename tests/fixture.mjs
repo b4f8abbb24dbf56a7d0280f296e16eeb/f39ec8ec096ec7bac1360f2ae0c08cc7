@@ -261,7 +261,12 @@ export async function exercise(run) {
   const assert = (await import("node:assert/strict")).default;
   const { unzipSync } = await import("fflate");
   const request = sample(),
-    unsigned = await run(request);
+    caller = structuredClone(request),
+    pending = run(caller);
+  assert.deepEqual(caller, request); // Caller buffers remain attached and unchanged.
+  caller.modules[0].data.fill(0);
+  caller.profile.name = "Changed after dispatch";
+  const unsigned = await pending;
   const files = unzipSync(unsigned.ipa),
     root = "Payload/Sample.app/";
   assert.equal(unsigned.signed, false);
@@ -272,6 +277,7 @@ export async function exercise(run) {
   );
   assert.ok(Object.keys(files).some((path) => path.endsWith(".metallib")));
   const game = JSON.parse(new TextDecoder().decode(files[root + "game.json"]));
+  assert.equal(game.name, request.profile.name); // Metadata is snapshotted with the bytes.
   for (const field of ["image", "imports", "exports", "fixups", "gates"])
     assert.ok(files[root + game.modules[0][field]], field);
   const signing = await signingFixture();
@@ -281,12 +287,14 @@ export async function exercise(run) {
       profile: signing.profile,
       password: signing.password,
     };
+    const originalCredentials = structuredClone(credentials);
     const result = await run({ ...request, signing: credentials });
     assert.equal(result.signed, true);
     const signed = unzipSync(result.ipa);
     await signing.verify(signed[root + "Sample"]);
     await signing.verify(signed[root + "Frameworks/nxgame.dylib"]);
     await assert.rejects(run({ ...request, signing: { ...credentials, password: "wrong" } }));
+    assert.deepEqual(credentials, originalCredentials);
   } finally {
     await signing.dispose();
   }

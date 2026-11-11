@@ -35,4 +35,4 @@ bun run build
 bun run test
 ```
 
-CI also tests the same `dist/nx2ipa.js` in Chromium. It publishes JS, offline HTML and a ZIP with licenses and corresponding source as an artifact. Tags beginning with `v` create a GitHub release. Open `dist/nx2ipa.html` directly; no application server is required.
+CI also tests the same `dist/nx2ipa.js` in Chromium. It publishes JS, offline HTML and a ZIP with licenses and corresponding source as an artifact. Successful main builds publish the package version once as a GitHub release; existing releases and tags are preserved. Tags beginning with `v` can also create a release. Open `dist/nx2ipa.html` directly; no application server is required.

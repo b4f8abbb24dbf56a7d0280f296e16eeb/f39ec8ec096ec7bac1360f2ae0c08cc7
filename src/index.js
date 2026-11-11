@@ -26,14 +26,14 @@ export async function createIpa(request, { signal, onProgress } = {}) {
   try {
     input = {
       template: { name: request.template.name, files: files(request.template.files) },
-      profile: request.profile === undefined ? undefined : structuredClone(request.profile),
+      profile: request.profile,
       modules: request.modules?.map((module) => ({ name: module.name, data: bytes(module.data) })),
       npdm: request.npdm === undefined ? undefined : bytes(request.npdm),
       nsp: request.nsp === undefined ? undefined : bytes(request.nsp),
       keys: request.keys === undefined ? undefined : bytes(request.keys),
       resources: files(request.resources ?? []),
       shaders: request.shaders?.map((shader) => ({
-        job: structuredClone(shader.job),
+        job: shader.job,
         code: bytes(shader.code),
       })),
       signing: request.signing
@@ -95,13 +95,13 @@ export async function createIpa(request, { signal, onProgress } = {}) {
       if (signal?.aborted) abort();
       else
         try {
-          worker.postMessage(input);
+          worker.postMessage(input, copies.map((copy) => copy.buffer));
         } catch (error) {
           finish(error);
         }
     });
   } finally {
-    for (const copy of copies) copy.fill(0);
+    for (const copy of copies) if (copy.byteLength) copy.fill(0);
     if (input?.signing) input.signing.password = "";
   }
 }
