@@ -2,7 +2,7 @@
 
 One self-contained JavaScript library for browsers and Bun, plus a local drag-and-drop HTML page. A thin WASM bridge uses the unmodified, pinned nxkit fork and npm zsign runtime. No WASM, keys, game data or downloaded source is committed.
 
-**The native iOS runtime now links, but is not yet embedded for game conversion.** The default game + keys flow remains disabled. Development builds expose `capabilities.embeddedHost === false`; production builds refuse to publish without a ready host. SDK linking, package validation and synthetic signing do not establish installation or gameplay.
+**Experimental:** drop one NSP/XCI and `prod.keys` to create an unsigned IPA locally. The real iOS 26 native runtime is included automatically; no host, profile or shader upload is required. Valid Apple signing/provisioning is still required before installation. SDK linking, package validation and synthetic signing have passed, but actual device installation, rendering, audio and gameplay remain unverified. `capabilities.experimental` and `deviceValidated:false` keep that distinction explicit.
 
 ```js
 import { createIpa, capabilities } from "./nx2ipa.js";
@@ -23,6 +23,8 @@ Browser workers read File/Blob slices on demand, so container padding does not r
 
 Unsigned output needs no signing credentials. API callers may optionally supply `signing:{identity,profile,password}` using P12/provisioning bytes. An unsigned or cryptographically signed archive does not establish Apple trust, installation, or gameplay.
 
+The generic runtime uses a 4 GiB virtual reserve and 3 GiB application budget, not a promise of available device RAM. Its Metal backend requires roughly a 3.8 GiB single-buffer limit; smaller `maxBufferLength` devices will reject startup. Actual dyld placement, memory limits and title-specific compatibility still need device evidence.
+
 Authored encrypted NSP/XCI fixtures exercise extraction, automatic shader discovery/compilation, rewriting and packaging in Bun; the same suite is configured for Chromium. Local base-container and bundled-update game diagnostics also completed with a structural test host, without shaders. Neither is a runnable-device test.
 
 ## Build
@@ -37,4 +39,4 @@ bun scripts/build.mjs --allow-missing-host # integration tests only
 bun run test
 ```
 
-The release build additionally requires a functional built-in iOS runtime at `.build/ios/host.json` and its app folder. CI publishes a clearly marked development preview with game conversion disabled and tests the same JS in Bun and Chromium. Its separate native test artifact contains the real unsigned iOS app, exact offline-rebuild sources and explicit validation receipts. The integration test packages an authored NSP with this actual host, checks synthetic host/guest signing and runs the native bundle reader; it does not execute a game or establish Apple signing trust. Main builds update GitHub Pages with the preview HTML, JS, licenses and source. Pull requests only validate. Open `dist/nx2ipa.html` directly for offline use.
+CI builds the WASM on Linux, builds the actual unsigned host against the iOS SDK, and checks authored NSP packaging, synthetic host/guest signing and the native bundle reader. It then embeds that exact host using `--experimental-host`, tests the final JS in Bun and Chromium (including real NSP/XCI drag-and-drop), and publishes the successful HTML/JS to GitHub Pages. Pull requests only validate. The experimental release keeps `runtimeReady`, device and gameplay flags false; it never invents signing credentials. Both exact source archives, dependency notices and validation receipts accompany the release. Open `dist/nx2ipa.html` directly for offline use.

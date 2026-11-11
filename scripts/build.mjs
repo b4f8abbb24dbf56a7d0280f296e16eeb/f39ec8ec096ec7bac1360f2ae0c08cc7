@@ -1,12 +1,16 @@
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { zipSync } from "fflate";
+import { experimentalHost, sha256 } from "./host.mjs";
 const root = resolve(import.meta.dir, "..");
 const file = (path) => resolve(root, path);
 let host = null;
+const experimental = Bun.argv.includes("--experimental-host");
+let hostEvidence;
 try {
-  const manifest = JSON.parse(await readFile(file(".build/ios/host.json"), "utf8"));
-  if (manifest.runtimeReady !== true || !/^[\w.-]+\.app$/.test(manifest.appName) ||
+  hostEvidence = experimental ? await experimentalHost() : null;
+  const manifest = hostEvidence?.manifest ?? JSON.parse(await readFile(file(".build/ios/host.json"), "utf8"));
+  if ((!experimental && manifest.runtimeReady !== true) || !/^[\w.-]+\.app$/.test(manifest.appName) ||
       !/^[\w.-]+$/.test(manifest.executable)) throw new Error("The built-in iOS host is not a functional runtime");
   const files = {};
   async function collect(directory, prefix = "") {
@@ -17,11 +21,11 @@ try {
       else throw new Error(`Unsupported host entry: ${path}`);
     }
   }
-  await collect(file(`.build/ios/${manifest.appName}`));
+  await collect(resolve(hostEvidence?.directory ?? file(".build/ios"), manifest.appName));
   if (!files[manifest.executable]?.length || !files["Info.plist"]?.length) throw new Error("Incomplete iOS host");
-  host = { appName: manifest.appName, executable: manifest.executable, zip: Buffer.from(zipSync(files)).toString("base64") };
+  host = { appName: manifest.appName, executable: manifest.executable, experimental, zip: Buffer.from(zipSync(files)).toString("base64") };
 } catch (error) {
-  if (error.code !== "ENOENT" || !Bun.argv.includes("--allow-missing-host")) throw error;
+  if (experimental || error.code !== "ENOENT" || !Bun.argv.includes("--allow-missing-host")) throw error;
   console.warn("Development build: no built-in iOS runtime; game conversion needs an explicit host template.");
 }
 const assets = {
@@ -42,7 +46,7 @@ const plugin = {
       contents: path === "nx2ipa:signer" ? signer
         : path === "nx2ipa:worker" ? `export default ${JSON.stringify(worker)};`
         : path === "nx2ipa:host" ? `export default ${JSON.stringify(host)};`
-        : path === "nx2ipa:capabilities" ? `export default {embeddedHost:${!!host}};`
+        : path === "nx2ipa:capabilities" ? `export default {embeddedHost:${!!host},experimental:${experimental},deviceValidated:false};`
         : `export const bridgeWasm=${JSON.stringify(assets.bridgeWasm)}; export const zsignWasm=${JSON.stringify(assets.zsignWasm)}; export default {bridgeWasm,zsignWasm};`,
     }));
   },
@@ -74,4 +78,12 @@ for (const path of ["node_modules/basecoat-css/dist/basecoat.cdn.min.css", "src/
 }
 if (!/<script type="module" src=["']\.\/src\/app\.js["']><\/script>/.test(html)) throw new Error("Missing HTML entrypoint");
 await writeFile(file("dist/nx2ipa.html"), html.replace(/<script type="module" src=["']\.\/src\/app\.js["']><\/script>/, () => `<script>${script}</script>`));
+await writeFile(file("dist/build.json"), JSON.stringify({
+  mode: experimental ? "experimental" : host ? "release" : "preview",
+  runtimeReady: !experimental && !!host, deviceValidated: false, gameplayValidated: false,
+  nativeHostSha256: hostEvidence?.manifest.binarySha256 ?? null,
+  nativeSourceSha256: hostEvidence?.manifest.source.sha256 ?? null,
+  jsSha256: sha256(await readFile(file("dist/nx2ipa.js"))),
+  htmlSha256: sha256(await readFile(file("dist/nx2ipa.html"))),
+}, null, 2) + "\n");
 console.log("Built self-contained dist/nx2ipa.js and dist/nx2ipa.html");

@@ -26,15 +26,11 @@ jobs:
         run: bun scripts/build.mjs --allow-missing-host
       - name: Test the release library in Bun
         run: bun run test
-      - run: bunx --no-install playwright install --with-deps chromium
-      - name: Test the same release library in Chromium
-        run: bun tests/browser.mjs
-      - name: Test drag-and-drop UI
-        run: bun tests/ui.mjs
       - run: bun scripts/release.mjs --preview
+      - run: cp bridge/target/wasm32-unknown-unknown/release/nx2ipa_bridge.wasm dist/
       - uses: actions/upload-artifact@v4
         with:
-          name: nx2ipa-preview
+          name: nx2ipa-bootstrap
           path: dist/
           if-no-files-found: error
   ios:
@@ -52,8 +48,9 @@ jobs:
       - run: bun scripts/source.mjs
       - uses: actions/download-artifact@v4
         with:
-          name: nx2ipa-preview
+          name: nx2ipa-bootstrap
           path: dist
+      - run: mkdir -p bridge/target/wasm32-unknown-unknown/release && mv dist/nx2ipa_bridge.wasm bridge/target/wasm32-unknown-unknown/release/
       - name: Build an unsigned test host and exact corresponding source
         run: cargo fetch --locked --manifest-path ios/Cargo.toml && bun tests/native-build.mjs && bun ios/tests/artifact.mjs && bun scripts/build-ios.mjs --test-artifact
         env:
@@ -62,15 +59,30 @@ jobs:
         run: PATH="$(brew --prefix openssl@3)/bin:$PATH" bun tests/native-host.mjs
         env:
           RUSTFLAGS: --cap-lints warn
+      - name: Embed the verified host as explicitly experimental
+        run: bun scripts/build.mjs --experimental-host
+      - name: Test the final embedded-host JS in Bun
+        run: bun run test && PATH="$(brew --prefix openssl@3)/bin:$PATH" bun tests/native-host.mjs
+        env:
+          RUSTFLAGS: --cap-lints warn
+      - run: bunx --no-install playwright install chromium
+      - name: Test the same final JS and game-plus-keys page in Chromium
+        run: bun tests/browser.mjs && bun tests/ui.mjs
+      - run: bun scripts/release.mjs --experimental-host
       - run: tar -czf .build/ios/native-test-only.tar.gz -C .build/ios test
       - uses: actions/upload-artifact@v4
         with:
           name: nx2ipa-native-test-only
           path: .build/ios/native-test-only.tar.gz
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nx2ipa-site
+          path: dist/
+          if-no-files-found: error
   pages:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
+    needs: ios
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -83,7 +95,7 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/download-artifact@v4
         with:
-          name: nx2ipa-preview
+          name: nx2ipa-site
           path: dist
       - run: mv dist/nx2ipa.html dist/index.html
       - uses: actions/upload-pages-artifact@v3

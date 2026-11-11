@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const selected = { game: undefined, keys: undefined };
 let controller, outputUrl, generation = 0, dragDepth = 0;
 const available = capabilities.embeddedHost === true;
+const experimental = available && capabilities.experimental === true;
 const unavailable = "Build unavailable: this version does not include an iOS runtime.";
 const size = (bytes) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2
   ? `${(bytes / 1024).toFixed(1)} KiB` : bytes < 1024 ** 3
@@ -41,7 +42,7 @@ const reset = () => {
   controller = undefined;
   clearOutput();
 };
-const ready = () => !available ? unavailable : selected.game && selected.keys ? "Ready to create an unsigned IPA."
+const ready = () => !available ? unavailable : selected.game && selected.keys ? `Ready to create an ${experimental ? "experimental unsigned" : "unsigned"} IPA.`
   : selected.game ? "Add your prod.keys to continue."
     : selected.keys ? "Add one NSP or XCI to continue." : "Choose your game and keys to get started.";
 
@@ -159,7 +160,8 @@ $("form").onsubmit = async (event) => {
     $("result-kind").textContent = result.signed ? "Signed" : "Unsigned";
     $("result-summary").textContent = `${name} · ${size(result.ipa.length)}`;
     const warnings = [...new Set([
-      ...(!result.signed ? ["This IPA is unsigned. Sign it separately before installation."] : []),
+      ...(experimental ? ["Experimental build. Successful packaging does not establish installation or gameplay."] : []),
+      ...(!result.signed ? ["This IPA is unsigned. Sign it separately with your own valid Apple signing identity and provisioning profile before attempting installation."] : []),
       "Device compatibility and gameplay have not been verified.",
       ...(Array.isArray(result.warnings) ? result.warnings.filter((warning) => typeof warning === "string") : []),
     ])];
@@ -183,6 +185,11 @@ $("form").onsubmit = async (event) => {
   }
 };
 $("runtime-notice").hidden = available;
+$("experimental-notice").hidden = !experimental;
+if (experimental) {
+  $("build-kind").textContent = "Experimental";
+  $("build").setAttribute("aria-describedby", "experimental-notice");
+}
 if (!available) {
   $("build").textContent = "Build unavailable";
   $("build").setAttribute("aria-describedby", "runtime-notice");

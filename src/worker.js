@@ -219,6 +219,7 @@ self.onmessage = async ({ data: input }) => {
   };
   try {
     progress("prepare");
+    const experimental = !input.template && embeddedHost?.experimental === true;
     if (!input.template && embeddedHost) input.template = {
       name: embeddedHost.appName,
       files: Object.entries(unzipSync(decode(embeddedHost.zip)))
@@ -242,6 +243,11 @@ self.onmessage = async ({ data: input }) => {
     )
       throw new Error("An unsigned arm64 iOS host template is required");
     const warnings = [];
+    if (experimental) {
+      warnings.push("Experimental native iOS runtime: device execution and gameplay have not been validated.");
+      if (!input.signing)
+        warnings.push("Unsigned IPA: valid external signing and provisioning are required before installation.");
+    }
     let shaderCount = 0;
     if (input.nsp || input.xci || input.modules) {
       let source = input.nsp ?? input.xci;

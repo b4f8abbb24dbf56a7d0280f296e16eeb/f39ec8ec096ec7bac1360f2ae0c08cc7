@@ -5,7 +5,7 @@ import { readFile, writeFile, mkdir, readdir, mkdtemp, rm } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { unzipSync } from "fflate";
-import { createIpa } from "../dist/nx2ipa.js";
+import { createIpa, capabilities } from "../dist/nx2ipa.js";
 import { sample, signingFixture } from "./fixture.mjs";
 import { containerSample } from "./containers.mjs";
 import { command } from "../scripts/source.mjs";
@@ -36,10 +36,16 @@ const signing = await signingFixture("app.nx2ipa.game");
 const temporary = await mkdtemp(join(tmpdir(), "nx2ipa-native-contract-"));
 try {
   const input = containerSample(sample());
-  const result = await createIpa({ template, nsp: input.nsp, keys: input.keys, signing });
+  const result = await createIpa({ ...(capabilities.embeddedHost ? {} : { template }), nsp: input.nsp, keys: input.keys, signing });
   assert.equal(result.signed, true);
   assert.equal(result.deviceValidated, false);
   assert.equal(result.shaderCount, 1);
+  if (capabilities.experimental) {
+    assert.ok(result.warnings.some(message => /experimental/i.test(message)));
+    const unsigned = await createIpa({ nsp: input.nsp, keys: input.keys });
+    assert.equal(unsigned.signed, false);
+    assert.ok(unsigned.warnings.some(message => /valid.*signing/i.test(message)));
+  }
   const files = unzipSync(result.ipa), root = "Payload/" + receipt.appName + "/";
   const game = JSON.parse(new TextDecoder().decode(files[root + "game.json"]));
   for (const path of [receipt.executable, game.dylib]) {
@@ -56,6 +62,7 @@ try {
   await writeFile(join(artifact, "integration-test.json"), JSON.stringify({
     schema: 1, nativeHostSha256: receipt.binarySha256, librarySha256: sha(await readFile("dist/nx2ipa.js")),
     authoredEncryptedNsp: true, automaticShaders: true, bundleContractAccepted: true,
+    embeddedHostTested: capabilities.embeddedHost,
     syntheticHostAndGuestCmsVerified: true, appleSigningTrustVerified: false,
     deviceValidated: false, gameplayValidated: false, runtimeReady: false,
   }, null, 2) + "\n");

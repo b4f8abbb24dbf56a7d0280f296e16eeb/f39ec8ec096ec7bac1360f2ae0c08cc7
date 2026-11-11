@@ -28,12 +28,16 @@
           <strong>iOS runtime not included</strong>
           <p>This version cannot create a game IPA yet. No extra files are needed from you.</p>
         </aside>
+        <aside id="experimental-notice" class="runtime-notice" role="note" hidden>
+          <strong>Experimental build</strong>
+          <p>Creates an unsigned IPA. iOS device compatibility and real gameplay have not been verified. Signing requires your own valid Apple signing identity and provisioning profile, handled separately.</p>
+        </aside>
         <form id="form" novalidate>
           <div class="card converter">
             <header>
               <h2>Create an IPA</h2>
               <p>One game and your own keys. Files stay local.</p>
-              <span class="badge card-action" data-variant="secondary">Local only</span>
+              <span id="build-kind" class="badge card-action" data-variant="secondary">Local only</span>
             </header>
             <section class="converter-body">
               <input id="files" type="file" accept=".nsp,.xci,.keys" multiple hidden />
@@ -80,7 +84,7 @@
             <summary>Before you build</summary>
             <div>
               <p>Use game backups and keys you have the right to use. Select both files together, or add them one at a time.</p>
-              <p>The IPA is unsigned. Signing and installation happen separately. Creating an archive does not verify device compatibility or gameplay.</p>
+              <p>The IPA is unsigned. Use your own valid Apple signing identity and provisioning profile in a separate signing tool before attempting installation. Signing alone does not establish device compatibility or gameplay.</p>
               <p>Game archives are read in chunks. Extracted game data is currently limited to 256 MiB, so larger titles may not build. Extraction checks consistency, not publisher authenticity.</p>
               <p>Your files stay in this page's memory. Keys are released when a build finishes or is cancelled. Closing the page clears the session.</p>
             </div>

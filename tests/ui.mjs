@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 // tests/browser.mjs separately exercises that unchanged release ESM and worker.
 const mock = `
   globalThis.conversions = [];
-  export const capabilities = { embeddedHost: globalThis.testEmbeddedHost !== false };
+  export const capabilities = { embeddedHost: globalThis.testEmbeddedHost !== false, experimental: globalThis.testExperimental !== false };
   export function createIpa(request, options) {
     return new Promise((resolve, reject) => {
       conversions.push({ request, options, resolve, reject });
@@ -69,6 +69,11 @@ try {
   };
   const calls = async (count) => page.waitForFunction((count) => conversions.length === count, count);
 
+  assert.equal(await page.locator("#experimental-notice").isVisible(), true);
+  assert.equal(await page.locator("#runtime-notice").isVisible(), false);
+  assert.match(await page.locator("#experimental-notice").textContent(), /real gameplay have not been verified/);
+  assert.match(await page.locator("#experimental-notice").textContent(), /valid Apple signing identity/);
+  assert.equal(await page.locator("#build-kind").textContent(), "Experimental");
   assert.equal(await page.locator("input[type=file]").count(), 1);
   assert.equal(await page.locator("#template,#profile,#shaders,#identity,#provision").count(), 0);
   assert.equal(await page.locator("#build").isDisabled(), true);
@@ -94,6 +99,7 @@ try {
   await page.locator("#form").dispatchEvent("submit");
   assert.equal(await page.evaluate(() => conversions.length), 1);
   assert.equal(await page.evaluate(() => conversions[0].request.nsp instanceof File), true);
+  assert.deepEqual(await page.evaluate(() => Object.keys(conversions[0].request).sort()), ["keys", "nsp"]);
   assert.equal(await page.locator("#progress").isVisible(), true);
   await page.evaluate(() => conversions[0].options.onProgress("extract"));
   assert.match(await page.locator("#status").textContent(), /Extracting/);
@@ -103,6 +109,9 @@ try {
   assert.doesNotMatch(await page.locator("#download").getAttribute("download"), /[<>/\\]/);
   assert.equal(await page.locator("#warnings img").count(), 0);
   assert.match(await page.locator("#warnings").textContent(), /not been verified/);
+  assert.match(await page.locator("#warnings").textContent(), /Experimental build/);
+  assert.match(await page.locator("#warnings").textContent(), /valid Apple signing identity/);
+  assert.equal(await page.locator("#result-kind").textContent(), "Unsigned");
   assert.match(await page.locator("#keys-name").textContent(), /No prod.keys/);
   assert.equal(await page.evaluate(() => conversions[0].request.keys.every((byte) => byte === 0)), true);
   assert.equal(await page.locator("#build").isDisabled(), true);
@@ -153,14 +162,22 @@ try {
   await blocked.addInitScript(() => { globalThis.testEmbeddedHost = false; });
   await blocked.goto(pathToFileURL(join(directory, "index.html")).href);
   assert.equal(await blocked.locator("#runtime-notice").isVisible(), true);
+  assert.equal(await blocked.locator("#experimental-notice").isVisible(), false);
   assert.equal(await blocked.locator("#build").isDisabled(), true);
   assert.match(await blocked.locator("#status").textContent(), /does not include an iOS runtime/);
   await blocked.locator("#form").dispatchEvent("submit");
   assert.equal(await blocked.evaluate(() => conversions.length), 0);
   await blocked.close();
+  const stable = await browser.newPage();
+  await stable.addInitScript(() => { globalThis.testExperimental = false; });
+  await stable.goto(pathToFileURL(join(directory, "index.html")).href);
+  assert.equal(await stable.locator("#experimental-notice").isVisible(), false);
+  assert.equal(await stable.locator("#runtime-notice").isVisible(), false);
+  assert.equal(await stable.locator("#build-kind").textContent(), "Local only");
+  await stable.close();
   assert.deepEqual(errors, []);
   assert.deepEqual(network, []);
-  console.log("UI: drag/drop, keyboard selection, atomic validation, stale completion, cancellation, key cleanup, mobile and offline checks passed.");
+  console.log("UI: drag/drop, keyboard selection, atomic validation, stale completion, cancellation, key cleanup, mobile, experimental/missing-host notices and offline checks passed.");
 } finally {
   await browser?.close();
   await rm(directory, { recursive: true, force: true });
