@@ -54,6 +54,8 @@ dependencies = [
  "nxb-extract",
  "nxb-image",
  "nxb-pyjson",
+ "nxb-shader",
+ "nxb-split",
  "nxb-xlate",
  "nxtitle",
 ]
@@ -121,6 +123,23 @@ name = "nxb-rewrite"
 version = "0.10.0"
 dependencies = [
  "nxb-a64",
+ "nxb-codec",
+ "nxb-error",
+ "nxb-model",
+]
+
+[[package]]
+name = "nxb-shader"
+version = "0.10.0"
+dependencies = [
+ "nxb-model",
+ "nxb-pyjson",
+]
+
+[[package]]
+name = "nxb-split"
+version = "0.10.0"
+dependencies = [
  "nxb-codec",
  "nxb-error",
  "nxb-model",

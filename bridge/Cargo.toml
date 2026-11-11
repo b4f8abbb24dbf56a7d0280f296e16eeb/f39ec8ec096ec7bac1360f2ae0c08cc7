@@ -11,6 +11,8 @@ crate-type = ["cdylib", "rlib"]
 nxb-image = { path = "../.build/nxkit/crates/nxb-image" }
 nxb-pyjson = { path = "../.build/nxkit/crates/nxb-pyjson" }
 nxtitle = { path = "../.build/nxkit/titles/nxtitle" }
+nxb-split = { path = "../.build/nxkit/crates/nxb-split" }
+nxb-shader = { path = "../.build/nxkit/crates/nxb-shader" }
 nxb-xlate = { path = "../.build/nxkit/crates/nxb-xlate" }
 air-front = { path = "../.build/nxkit/crates/air-front" }
 

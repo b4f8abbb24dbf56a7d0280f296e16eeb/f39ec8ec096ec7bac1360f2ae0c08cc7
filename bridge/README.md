@@ -27,10 +27,18 @@ Every response has `version:1`, `ok`, and either the result fields or `error`.
   `memory`, `services`, and `nvnFunctions`. Settings/memory explicitly override
   upstream defaults in game.json. The JS adapter infers standard module order and IDs for raw containers;
   title-specific settings/patch rules are not guessed.
+- `discoverShaders`: `modules:[{name,data}]` and `files:[{path,data}]` (RomFS-relative
+  paths). Runs the unchanged nxkit module, file and archive readers, Unity second
+  pass, shader deduplication, compute fact inference and stage pairing, then
+  compiles to iOS. Returns `count`, `warnings` and `files`, including shader tables.
+  Fragment inputs are available before their vertex/mesh partners translate.
+  Graphics queries use upstream defaults where no inferred facts exist.
 - `compileShaders`: `jobs:[{job,code}]`, where `job` is an upstream nxkit shader
   job object and `code` is explicit machine-code bytes. Translates and compiles
   with the portable compiler for iOS. Unsupported inputs fail rather than using
-  Apple tools or replacement shaders. Shader discovery and pairing are not inferred.
+  Apple tools or replacement shaders. Explicit jobs override automatic discovery
+  and do not infer pairing. Returns `count`, `warnings` and `files`. Both paths
+  split fragment alpha/logic entries into the `_bx.metallib` expected by the host.
 
 Build and shader results contain `files:[{path,data}]` using relative runfolder
 paths. The dylib declares iOS 26; this is a narrow Mach-O adaptation in this

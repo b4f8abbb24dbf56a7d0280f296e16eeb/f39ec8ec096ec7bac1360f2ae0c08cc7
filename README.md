@@ -13,7 +13,9 @@ const { ipa, name, signed, warnings } = await createIpa({
 });
 ```
 
-Raw input infers the title ID, display name/version, NPDM, module build IDs and standard module load order. Optional `profile` values override metadata, with supplied title ID/numeric version checked against the container. Extracted-module callers can instead supply `modules:[{name,data}]`, `npdm`, `profile` and `resources:[{path,data}]`. Shader jobs remain explicit `shaders:[{job,code}]`; automatic shader discovery is not implemented. The result reports warnings and `deviceValidated:false`.
+Raw input infers the title ID, display name/version, NPDM, module build IDs and standard module load order. Optional `profile` values override metadata, with supplied title ID/numeric version checked against the container. Extracted-module callers can instead supply `modules:[{name,data}]`, `npdm`, `profile` and `resources:[{path,data}]`. Shaders are discovered automatically in NSO modules and supported RomFS containers using nxkit’s unchanged readers. Compute threadgroup facts, shader keys, vertex/fragment pairs, reflection and iOS Metal libraries are generated locally. Advanced callers may override discovery with explicit `shaders:[{job,code}]`. The result reports `shaderCount`, warnings and `deviceValidated:false`.
+
+Discovery includes nxkit’s BNSH/BAHS, compressed and archive readers, zstd dictionaries and Unity type-tree second pass. Unknown formats may contain shaders the readers cannot find; a zero count produces a warning. Recognized malformed or unsupported shaders fail conversion, rather than silently leaving out a failed shader. Title-specific graphics query facts are not inferred, and the portable compiler has no Apple compiler fallback or device validation. Discovery does not establish gameplay compatibility.
 
 A single base application with at most one bundled update is accepted from NSP or the XCI secure partition. Update-only inputs, DLC, multi-title packages and NCZ are unsupported. Extraction checks section hashes and metadata consistency, not Nintendo signatures or CNMT content hashes. XCI HFS0 hashes are not authenticated.
 
@@ -21,7 +23,7 @@ Browser workers read File/Blob slices on demand, so container padding does not r
 
 Unsigned output needs no signing credentials. API callers may optionally supply `signing:{identity,profile,password}` using P12/provisioning bytes. An unsigned or cryptographically signed archive does not establish Apple trust, installation, or gameplay.
 
-Authored encrypted NSP/XCI fixtures exercise the real extraction, rewriting and packaging pipeline in Bun; the same suite is configured for Chromium. Local base-container and bundled-update game diagnostics also completed with a structural test host, without shaders. Neither is a runnable-device test.
+Authored encrypted NSP/XCI fixtures exercise extraction, automatic shader discovery/compilation, rewriting and packaging in Bun; the same suite is configured for Chromium. Local base-container and bundled-update game diagnostics also completed with a structural test host, without shaders. Neither is a runnable-device test.
 
 ## Build
 

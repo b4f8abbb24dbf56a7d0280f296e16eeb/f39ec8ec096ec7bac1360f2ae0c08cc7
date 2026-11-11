@@ -3,6 +3,7 @@ use nxb_image::{image, layout, manifest, npdm};
 use nxb_pyjson::{Value as J, dumps, parse};
 
 mod extract;
+mod shaders;
 
 type Result<T> = std::result::Result<T, String>;
 const LIMIT: usize = 512 * 1024 * 1024;
@@ -302,33 +303,6 @@ fn ios_dylib(b: &mut [u8]) -> Result<()> {
     Ok(())
 }
 
-fn compile_shaders(input: &J) -> Result<J> {
-    let mut files = Vec::new();
-    for entry in list(field(input, "jobs")?)? {
-        let job_value = field(entry, "job")?;
-        let jobs = nxb_xlate::job::parse_jobs(&dumps(&J::List(vec![job_value.clone()])))?;
-        let job = jobs.first().ok_or("missing shader job")?;
-        safe_name(&job.key)?;
-        let code = bytes(field(entry, "code")?)?;
-        let translated = nxb_xlate::msl::translate(job, &code, &Default::default())
-            .map_err(|e| format!("{}: {}", e.reason, e.detail))?;
-        for lib in translated.libraries {
-            let stem = format!("shaders/{}{}", job.key, lib.suffix);
-            let metallib = air_front::build_raw(lib.msl.as_bytes(), &air_front::Target::ios())
-                .map_err(|e| format!("shader compilation: {e:?}"))?;
-            files.push(file(format!("{stem}.metal"), lib.msl.as_bytes()));
-            files.push(file(format!("{stem}.metallib"), &metallib));
-            if let Some(reflection) = lib.reflection {
-                files.push(file(
-                    format!("{stem}.json"),
-                    dumps(&reflection.to_value()).as_bytes(),
-                ));
-            }
-        }
-    }
-    Ok(J::obj([("files", J::List(files))]))
-}
-
 pub fn process(input: &[u8]) -> Vec<u8> {
     let result = (|| {
         if input.len() > LIMIT {
@@ -368,7 +342,8 @@ pub fn process(input: &[u8]) -> Vec<u8> {
         }
         match text(&j, "op")? {
             "buildRunfolder" => build_runfolder(&j),
-            "compileShaders" => compile_shaders(&j),
+            "compileShaders" => shaders::explicit(&j),
+            "discoverShaders" => shaders::discover(&j),
             "extract" => extract::extract(&j),
             _ => Err("unknown operation".into()),
         }

@@ -2,6 +2,7 @@
 import { createCipheriv, createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { unzipSync } from "fflate";
+import { shaderContainer } from "./fixture.mjs";
 const enc = new TextEncoder();
 const title = 0x0100000000000000n;
 const headerKey = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1));
@@ -100,7 +101,7 @@ function nca(type, sections, titleId = title) {
 export function containerSample(sample, { update = false, updateOnly = false, wrongPatchTitle = false } = {}) {
   const programId = "11".repeat(16), controlId = "22".repeat(16), metaId = "33".repeat(16);
   const nacp = Buffer.alloc(0x4000); nacp.write("Authored encrypted sample"); nacp.write("Test publisher", 0x200); nacp.write("1.2.3", 0x3060);
-  const program = nca(0, [pfsSection([["main", sample.modules[0].data], ["main.npdm", sample.npdm]]), romSection([["message.txt", Buffer.from("encrypted authored resource")]])]);
+  const program = nca(0, [pfsSection([["main", sample.modules[0].data], ["main.npdm", sample.npdm]]), romSection([["message.txt", Buffer.from("encrypted authored resource")], ["shader.bnsh", shaderContainer(sample.shaders[0].code)]])]);
   const control = nca(2, [romSection([["control.nacp", nacp]])]);
   const cnmt = Buffer.alloc(0x20 + 0x10 + 2 * 0x38);
   u64(cnmt, 0, title); u32(cnmt, 8, 65536); cnmt[0xc] = 0x80; cnmt.writeUInt16LE(0x10, 0xe); cnmt.writeUInt16LE(2, 0x10);
@@ -142,6 +143,8 @@ export async function exerciseContainers(run, sample) {
     assert.equal(game.version_number, 65536); assert.equal(game.version, "1.2.3");
     assert.equal(new TextDecoder().decode(files[root + "nxkit/romfs/message.txt"]), "encrypted authored resource");
     assert.equal(result.signed, false); assert.equal(result.deviceValidated, false);
+    assert.equal(result.shaderCount, 1);
+    assert.ok(Object.keys(files).some((name) => /nxkit\/shaders\/[0-9a-f]{16}_b\.metallib$/.test(name)));
     assert.ok(files[root + "Frameworks/nxgame.dylib"]);
     assert.equal(game.title_id, "0100000000000000");
     assert.deepEqual(files[root + "nxkit/main.npdm"], sample.npdm);
@@ -161,6 +164,7 @@ export async function exerciseContainers(run, sample) {
     const result = await run({ ...base, [kind]: merged[kind] });
     const files = unzipSync(result.ipa);
     const game = JSON.parse(new TextDecoder().decode(files[root + "game.json"]));
+    assert.equal(result.shaderCount, 1);
     assert.equal(game.version_number, 131072);
     assert.equal(game.title_id, "0100000000000000");
     assert.equal(game.name, "Authored encrypted sample");

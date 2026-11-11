@@ -242,6 +242,7 @@ self.onmessage = async ({ data: input }) => {
     )
       throw new Error("An unsigned arm64 iOS host template is required");
     const warnings = [];
+    let shaderCount = 0;
     if (input.nsp || input.xci || input.modules) {
       let source = input.nsp ?? input.xci;
       let reader;
@@ -328,8 +329,6 @@ self.onmessage = async ({ data: input }) => {
         source = input.nsp = input.xci = undefined;
       }
       if (!input.profile.modules) input.profile.modules = inferModules(modules);
-      if (!input.shaders?.length)
-        warnings.push("No shaders were compiled. Shader discovery and gameplay compatibility are not verified.");
       progress("build");
       const generated = invoke({
         op: "buildRunfolder",
@@ -337,15 +336,22 @@ self.onmessage = async ({ data: input }) => {
         modules: modules.map((module) => ({ name: module.name, data: encode(module.data) })),
         npdm: encode(npdm),
       });
-      if (input.shaders?.length) {
-        progress("shaders");
-        generated.files.push(
-          ...invoke({
-            op: "compileShaders",
-            jobs: input.shaders.map((shader) => ({ job: shader.job, code: encode(shader.code) })),
-          }).files,
-        );
-      }
+      progress("shaders");
+      const shaders = invoke(input.shaders?.length ? {
+        op: "compileShaders",
+        jobs: input.shaders.map((shader) => ({ job: shader.job, code: encode(shader.code) })),
+      } : {
+        op: "discoverShaders",
+        modules: modules.map((module) => ({ name: module.name, data: encode(module.data) })),
+        files: resources.filter((file) => file.path.startsWith("romfs/")).map((file) => ({
+          path: file.path.slice(6), data: encode(file.data),
+        })),
+      });
+      generated.files.push(...shaders.files);
+      shaderCount = shaders.count;
+      warnings.push(...shaders.warnings);
+      if (!shaderCount)
+        warnings.push("No shaders were found in the supported containers. Gameplay compatibility is not verified.");
       // Let the engine reclaim the large linear memory before decoding and
       // packaging the generated files. Never retain both base64 and bytes.
       wasm = instance = modules = npdm = input.modules = input.npdm = undefined;
@@ -408,7 +414,7 @@ self.onmessage = async ({ data: input }) => {
       ];
     const ipa = zipSync(archive, { level: 0 });
     self.postMessage({ result: {
-      ipa, signed: !!input.signing, deviceValidated: false, warnings,
+      ipa, signed: !!input.signing, deviceValidated: false, warnings, shaderCount,
       name: input.profile?.name || input.template.name.slice(0, -4),
       titleId: input.profile?.titleId,
     } }, [

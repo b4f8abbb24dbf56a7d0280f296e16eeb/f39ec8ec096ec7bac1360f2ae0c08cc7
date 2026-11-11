@@ -120,6 +120,47 @@ export function sample() {
   };
 }
 
+// Minimal authored BNSH containing one Maxwell compute EXIT program.
+export function shaderContainer(code = sample().shaders[0].code) {
+  const data = new Uint8Array(0x9c0 + code.length), view = new DataView(data.buffer);
+  const u32 = (at, n) => view.setUint32(at, n, true);
+  const u64 = (at, n) => view.setBigUint64(at, BigInt(n), true);
+  data.set(new TextEncoder().encode("BNSH"));
+  data.set(new TextEncoder().encode("grsc"), 0x60);
+  u32(0x7c, 1); u64(0x80, 0x90); u64(0xa0, 0xd0);
+  u64(0xd0 + 8 + 8 * 5, 0x120);
+  u64(0x128, 0x140); u64(0x130, 0x9c0);
+  u32(0x138, code.length); u32(0x13c, 0x880);
+  u32(0x140, 0x98761234); u32(0x160, 0x880);
+  u32(0x840, code.length); u32(0x844, code.length);
+  for (const at of [0x888, 0x88c, 0x890]) u32(at, 1);
+  data.set(code, 0x9c0);
+  return data;
+}
+
+// One paired graphics program, including a fragment colour output for _bx.
+export function graphicsShaderContainer() {
+  const data = new Uint8Array(0x200 + 2 * (0x880 + 0x98));
+  const view = new DataView(data.buffer);
+  const u32 = (at, n) => view.setUint32(at, n, true);
+  const u64 = (at, n) => view.setBigUint64(at, BigInt(n), true);
+  data.set(new TextEncoder().encode("BNSH"));
+  data.set(new TextEncoder().encode("grsc"), 0x60);
+  u32(0x7c, 1); u64(0x80, 0x90); u64(0xa0, 0xd0);
+  for (const [i, stage] of [0, 4].entries()) {
+    const descriptor = 0x120 + i * 0x20, control = 0x200 + i * (0x880 + 0x98), code = control + 0x880;
+    u64(0xd0 + 8 + 8 * stage, descriptor);
+    u64(descriptor + 8, control); u64(descriptor + 16, code);
+    u32(descriptor + 24, 0x98); u32(descriptor + 28, 0x880);
+    u32(control, 0x98761234); u32(control + 0x20, 0x880);
+    u32(control + 0x700, 0x98); u32(control + 0x704, 0x98);
+    u32(code, 0x12345678); u32(code + 0x30, ((stage + 1) << 10) | 1);
+    if (stage === 4) u32(code + 0x30 + 18 * 4, 15);
+    u64(code + 0x88, 0xe30000000007000fn);
+  }
+  return data;
+}
+
 export async function signingFixture() {
   const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -282,6 +323,50 @@ export async function exercise(run) {
   assert.equal(game.name, request.profile.name); // Metadata is snapshotted with the bytes.
   for (const field of ["image", "imports", "exports", "fixups", "gates"])
     assert.ok(files[root + game.modules[0][field]], field);
+  const automatic = { ...request, shaders: undefined,
+    resources: [...request.resources, { path: "romfs/shader.bnsh", data: shaderContainer() }] };
+  const discovered = await run(automatic);
+  assert.equal(discovered.shaderCount, 1);
+  const autoFiles = unzipSync(discovered.ipa);
+  assert.ok(Object.keys(autoFiles).some((name) => /nxkit\/shaders\/[0-9a-f]{16}_b\.metallib$/.test(name)));
+  assert.ok(autoFiles[root + "nxkit/shaders/shader_map.tsv"]);
+  // Independent runtime-key oracle: SHA-256(control || original code), 16 hex.
+  const { createHash } = await import("node:crypto");
+  const bnsh = shaderContainer();
+  const key = createHash("sha256").update(bnsh.subarray(0x140, 0x9c0)).update(bnsh.subarray(0x9c0)).digest("hex").slice(0, 16);
+  const reference = await run({ ...request, resources: [], shaders: [{
+    code: request.shaders[0].code, job: { ...request.shaders[0].job, key, reduced: true },
+  }] });
+  const referenceFiles = unzipSync(reference.ipa);
+  for (const ext of ["metal", "metallib"])
+    assert.deepEqual(autoFiles[root + `nxkit/shaders/${key}_b.${ext}`], referenceFiles[root + `nxkit/shaders/${key}_b.${ext}`]);
+  const reflection = JSON.parse(new TextDecoder().decode(autoFiles[root + `nxkit/shaders/${key}_b.json`]));
+  assert.deepEqual(reflection.threadgroup_size, [1, 1, 1]);
+  const moduleWithShader = structuredClone(request.modules[0]);
+  moduleWithShader.data.set(shaderContainer(), 0x4100);
+  const fromNso = await run({ ...automatic, modules: [moduleWithShader], resources: [] });
+  assert.equal(fromNso.shaderCount, 1);
+  const nsoFiles = unzipSync(fromNso.ipa);
+  assert.match(new TextDecoder().decode(nsoFiles[root + "nxkit/shaders/shader_map.tsv"]), /main#BNSH@0x4000/);
+  const duplicate = await run({ ...automatic, resources: [
+    ...automatic.resources, { path: "romfs/duplicate.bnsh", data: shaderContainer() },
+  ] });
+  assert.equal(duplicate.shaderCount, 1);
+  const graphics = await run({ ...automatic, resources: [{ path: "romfs/graphics.bnsh", data: graphicsShaderContainer() }] });
+  assert.equal(graphics.shaderCount, 2);
+  const graphicsFiles = unzipSync(graphics.ipa);
+  assert.ok(Object.keys(graphicsFiles).some((name) => name.endsWith("_bx.metallib")));
+  assert.match(new TextDecoder().decode(graphicsFiles[root + "nxkit/shaders/shader_pairs.tsv"]), /^[0-9a-f]{16}\t[0-9a-f]{16}\n$/);
+
+  const { zipSync } = await import("fflate");
+  const archived = await run({ ...automatic, resources: [{
+    path: "romfs/shaders.zip", data: zipSync({ "nested/shader.bnsh": shaderContainer() }),
+  }] });
+  assert.equal(archived.shaderCount, 1);
+  const broken = shaderContainer();
+  new DataView(broken.buffer).setBigUint64(0x128, BigInt(broken.length + 1), true);
+  await assert.rejects(run({ ...automatic, resources: [{ path: "romfs/broken.bnsh", data: broken }] }), /during shaders/);
+  await assert.rejects(run(automatic, { abortAt: "shaders" }), { name: "AbortError" });
   const signing = await signingFixture();
   try {
     const credentials = {
@@ -322,6 +407,6 @@ export async function exercise(run) {
   const retried = await run(request);
   assert.deepEqual(retried.ipa, unsigned.ipa);
   console.log(
-    "Passed: real build/shaders/IPA/signing, host and guest CMS signatures, invalid input, cancel and retry. No device/gameplay claim.",
+    "Passed: automatic BNSH/ZIP discovery, runtime shader keys, compute reference byte equality, graphics pairing/side library, malformed shader rejection; build/IPA/signing, host and guest CMS signatures, cancel and retry. No device/gameplay claim.",
   );
 }
