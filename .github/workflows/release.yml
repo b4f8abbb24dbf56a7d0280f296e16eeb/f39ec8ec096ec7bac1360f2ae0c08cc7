@@ -49,7 +49,7 @@ jobs:
       - run: rustup toolchain install 1.99.0 --profile minimal --target aarch64-apple-ios
       - run: bun scripts/source.mjs
       - name: Link the UIKit, input and audio probe against the iOS SDK
-        run: bun scripts/build-ios.mjs --link-check
+        run: bun tests/native-build.mjs && bun scripts/build-ios.mjs --link-check
         env:
           RUSTFLAGS: --cap-lints warn
   pages:

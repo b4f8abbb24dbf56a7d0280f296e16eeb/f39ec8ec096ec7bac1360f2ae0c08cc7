@@ -2,9 +2,9 @@ import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 export async function command(args, cwd = root) {
-  const process = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(args, { cwd, env: { ...process.env }, stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([
-    new Response(process.stdout).text(), new Response(process.stderr).text(), process.exited,
+    new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ]);
   if (code) throw new Error(`${args[0]} failed: ${err}`);
   return out.trim();

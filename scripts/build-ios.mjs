@@ -60,6 +60,16 @@ async function prepareAdapter(name, crateName, replaced, adapter) {
 export const prepareIosInput = () => prepareAdapter("input", "nxkit-svc-input", "sys/mod.rs", "ios/input/platform.rs");
 export const prepareIosAudio = () => prepareAdapter("audio", "nxkit-svc-audio", "sys/au.rs", "ios/audio/output.rs");
 
+/** Reject the wrong architecture, simulator/desktop targets, or a lost deployment floor. */
+export function verifyIosProbe(arch, build, libraries) {
+  const failures = [];
+  if (arch !== "arm64") failures.push(`architecture is ${JSON.stringify(arch)}, expected arm64`);
+  if (!/^\s*platform\s+IOS\s*$/m.test(build)) failures.push("vtool does not report platform IOS");
+  if (!/^\s*minos\s+26\.0(?:\.0)?\s*$/m.test(build)) failures.push("the deployment target is not iOS 26.0");
+  if (/AppKit/.test(libraries)) failures.push("the probe links AppKit");
+  if (failures.length) throw new Error(`The native probe is not an arm64 iOS 26.0 link: ${failures.join("; ")}`);
+}
+
 if (import.meta.main) {
   if (process.argv[2] !== "--check" && process.argv[2] !== "--prepare" && process.argv[2] !== "--link-check") {
     throw new Error("No complete iOS guest runtime is linked. --check verifies the Rust UIKit/input/audio adapters only; it cannot produce a production host template.");
@@ -77,11 +87,7 @@ if (import.meta.main) {
     const arch = await command(["lipo", "-archs", binary]);
     // Print the SDK evidence before asserting so CI failures identify the exact boundary.
     console.log(`Native probe architectures: ${JSON.stringify(arch)}\n${build}\n${libraries}`);
-    const failures = [];
-    if (arch !== "arm64") failures.push(`architecture is ${JSON.stringify(arch)}, expected arm64`);
-    if (!/platform IOS\b/.test(build)) failures.push("vtool does not report platform IOS");
-    if (/AppKit/.test(libraries)) failures.push("the probe links AppKit");
-    if (failures.length) throw new Error(`The native probe is not an arm64 iOS-only link: ${failures.join("; ")}`);
+    verifyIosProbe(arch, build, libraries);
     console.log("Linked Rust UIKit/input/audio SDK probe only. No production host or runtimeReady receipt was produced.");
   }
   if (process.argv[2] === "--check") {
