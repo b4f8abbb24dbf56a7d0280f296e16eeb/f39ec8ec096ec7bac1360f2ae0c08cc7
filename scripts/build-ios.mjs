@@ -75,9 +75,13 @@ if (import.meta.main) {
     const build = await command(["xcrun", "vtool", "-show-build", binary]);
     const libraries = await command(["otool", "-L", binary]);
     const arch = await command(["lipo", "-archs", binary]);
-    if (arch !== "arm64" || !/platform IOS\b/.test(build) || /AppKit/.test(libraries))
-      throw new Error("The native probe is not an arm64 iOS-only link");
-    console.log(build + "\n" + libraries);
+    // Print the SDK evidence before asserting so CI failures identify the exact boundary.
+    console.log(`Native probe architectures: ${JSON.stringify(arch)}\n${build}\n${libraries}`);
+    const failures = [];
+    if (arch !== "arm64") failures.push(`architecture is ${JSON.stringify(arch)}, expected arm64`);
+    if (!/platform IOS\b/.test(build)) failures.push("vtool does not report platform IOS");
+    if (/AppKit/.test(libraries)) failures.push("the probe links AppKit");
+    if (failures.length) throw new Error(`The native probe is not an arm64 iOS-only link: ${failures.join("; ")}`);
     console.log("Linked Rust UIKit/input/audio SDK probe only. No production host or runtimeReady receipt was produced.");
   }
   if (process.argv[2] === "--check") {
