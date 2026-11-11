@@ -91,6 +91,11 @@ pub trait Session {
     fn set_active(&mut self, active: bool);
     fn resize(&mut self, width: u32, height: u32);
     fn touches(&mut self, points: &[Touch]);
+    /// Complete Npad button/stick snapshot for the virtual player-one controller.
+    fn virtual_pad(&mut self, buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32);
+    /// Physical extended-profile gamepad presence, excluding the overlay.
+    fn has_controller(&self) -> bool;
+    fn is_handheld(&self) -> bool;
     /// None means full drawable. Only return an aspect if rendering aspect-fits.
     fn picture_aspect(&self) -> Option<f64> {
         None

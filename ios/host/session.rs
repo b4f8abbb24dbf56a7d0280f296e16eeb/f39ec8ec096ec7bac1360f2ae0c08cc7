@@ -60,6 +60,17 @@ impl Session for GameSession {
             nxkit_svc_input::set_touches(&points);
         }
     }
+    fn virtual_pad(&mut self, buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32) {
+        if !self.stopped && !stop::requested() {
+            nxkit_svc_input::set_virtual_pad(buttons, lx, ly, rx, ry);
+        }
+    }
+    fn has_controller(&self) -> bool {
+        !self.stopped && nxkit_svc_input::has_controller()
+    }
+    fn is_handheld(&self) -> bool {
+        nxkit_svc_input::is_handheld()
+    }
     fn stop(&mut self) {
         if self.stopped {
             return;

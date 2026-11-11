@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/LNPANDY/NX2Apple",
+  "commit": "46829b566c4c7f9c72bc8f5ba13523de82308eb9",
+  "engineRepository": "https://github.com/seedds/nxnative",
+  "engineCommit": "ab41d6a177819559c76d8e4381791550ababa097",
+  "patches": "NX2Apple patches/series, applied only to overlay/layout/menu/test paths",
+  "sourceFiles": {
+    "DmGamepad.m": "2e7c7e7c8a3bdcb35110ea2ed923c820d63cc6e694e9e4444f0ae96df1c64a73",
+    "DmPadGeometry.h": "b145e9d9fde2b8468b0baef83f8c1da0a771770dd8ef37d917e436f9e60e3701",
+    "DmLayout.h": "983e430af7f55ab9b3128ccd92b075f7aeb42668922a20180ebb04433b6c3efc",
+    "GameMenu.swift": "e7b3726e476547d9e82c1a9e964362506641e4351425045c25dab5b363261d3a",
+    "../tests/pad_geometry/pad_geometry_check.m": "93b7aa11008372126b59c360ea56d3f8a9ac616591d84c22b1144b8543d19557"
+  },
+  "license": "MIT",
+  "adaptations": [
+    "Virtual state and game touches route through nx2ipa C ABI.",
+    "Physical controller, gyro, rumble and controller applet implementations are not copied.",
+    "Scene lifecycle synchronously clears input, cancelling releases toggle keys.",
+    "Layout picture rectangle follows nxkit presenter instead of nxnative split-screen/TV rendering.",
+    "Swift menu exposes implemented controls only, including saved size/stick/feedback and confirmed process exit."
+  ]
+}

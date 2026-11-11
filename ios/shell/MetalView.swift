@@ -6,8 +6,12 @@ final class MetalView: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     var active = false {
-        didSet { if !active { clearTouches() } }
+        didSet {
+            if !active { clearTouches() }
+            if overlay != nil { nx2ipa_overlay_active(active) }
+        }
     }
+    private var overlay: UIView?
     private var fingers = TouchState()
     private var touchSize = CGSize.zero
 
@@ -29,9 +33,19 @@ final class MetalView: UIView {
         metalLayer.drawableSize = CGSize(width: width.rounded(.down), height: height.rounded(.down))
         nx2ipa_resize(UInt32(width), UInt32(height))
     }
+    func installOverlay() {
+        guard overlay == nil else { return }
+        clearTouches()
+        let controls = nx2ipa_overlay_create(bounds)
+        controls.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(controls)
+        overlay = controls
+        nx2ipa_overlay_active(active)
+    }
     func clearTouches() {
         fingers.clear()
         nx2ipa_touches(nil, 0)
+        if overlay != nil { nx2ipa_overlay_reset() }
     }
     private func update(_ touches: Set<UITouch>, phase: Int) {
         guard active else { clearTouches(); return }

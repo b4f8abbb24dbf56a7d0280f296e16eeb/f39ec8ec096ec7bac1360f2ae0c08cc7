@@ -8,7 +8,8 @@ not claims that upstream itself supports iOS.
 Implemented:
 
 - Swift UIKit app entry, scene lifecycle, CAMetalLayer sizing, error display
-  and 16-point multitouch. A small C ABI connects the shell to the existing Rust
+  and 16-point multitouch, with NX2Apple-derived virtual controls and native menu.
+  A small C ABI connects the shell to the existing Rust
   runtime, including GameController/Core Haptics and display-rate policy.
 - Signed guest-dylib loading through dyld only. The host checks ARM64/iOS 26,
   rejects automatic initializers and dependencies except libSystem, validates module segments,

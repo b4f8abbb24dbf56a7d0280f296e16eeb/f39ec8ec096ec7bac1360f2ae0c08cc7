@@ -121,3 +121,23 @@ pub extern "C" fn nx2ipa_stop() {
         s.stop();
     });
 }
+
+/// A complete virtual-pad snapshot, never a delta. Sanitized by the input adapter.
+#[unsafe(no_mangle)]
+pub extern "C" fn nx2ipa_virtual_pad(buttons: u64, lx: f32, ly: f32, rx: f32, ry: f32) {
+    with_session(|s| s.virtual_pad(buttons, lx, ly, rx, ry));
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn nx2ipa_has_controller() -> bool {
+    if !main_thread() {
+        return false;
+    }
+    SESSION.with_borrow(|s| s.as_ref().is_some_and(|s| s.has_controller()))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn nx2ipa_is_handheld() -> bool {
+    if !main_thread() {
+        return false;
+    }
+    SESSION.with_borrow(|s| s.as_ref().is_some_and(|s| s.is_handheld()))
+}

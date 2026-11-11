@@ -7,3 +7,5 @@
 - **Basecoat CSS 1.1.0:** MIT, used for the static page's accessible UI components. Its standalone stylesheet is embedded at build time, with no runtime CDN request. Its license accompanies the release.
 
 Redistribute the release's corresponding source and notices with its JS/HTML/WASM. Generated IPAs can have separate rights and distribution requirements.
+
+- **NX2Apple / nxnative overlay:** MIT, copyright 2026 seedds, jhaizhou, LNPANDY and NX2Apple contributors. `ios/shell/overlay` adapts NX2Apple's actual single-game virtual controls and geometry, and `ios/shell/GameMenu.swift` adapts its native menu. Exact upstream revisions and source hashes are in `ios/shell/overlay/SOURCE.json`, with the full license in `ios/shell/overlay/LICENSE`. Native test apps and generated apps retain these notices in `ThirdPartyNotices`; the corresponding source archive includes all adaptations and tests. nxkit remains GPL-3.0-only.

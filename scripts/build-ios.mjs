@@ -67,7 +67,7 @@ async function prepareAdapter(name, crateName, overrides) {
 }
 
 const adapters = {
-  input: ["nxkit-svc-input", { "sys/mod.rs": "ios/input/platform.rs" }],
+  input: ["nxkit-svc-input", { "lib.rs": "ios/input/lib.rs", "sys/mod.rs": "ios/input/platform.rs", "sys/virtual_pad.rs": "ios/input/virtual_pad.rs" }],
   audio: ["nxkit-svc-audio", { "lib.rs": "ios/audio/lib.rs", "sys/au.rs": "ios/audio/output.rs" }],
   metal: ["nxkit-metal", { "lib.rs": "ios/metal/lib.rs", "present.rs": "ios/metal/present.rs" }],
   coreml: ["nxkit-coreml", { "lib.rs": "ios/coreml/lib.rs" }],
@@ -121,6 +121,16 @@ async function buildRuntime() {
   if (code) throw new Error("The Rust runtime static library failed to build");
   return nativeLinkFlags(stdout + stderr);
 }
+export async function testOverlayGeometry() {
+  const directory = await mkdtemp(join(root, ".overlay-geometry-"));
+  try {
+    const binary = join(directory, "check");
+    await command([process.env.CC || "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra",
+      "-Werror", "-Wno-missing-field-initializers", "-Wno-deprecated",
+      "-Iios/shell/tests/geometry", "-Iios/shell/overlay", "ios/shell/tests/geometry/check.c", "-lm", "-o", binary]);
+    return await command([binary]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
 async function testSwiftShell() {
   const binary = resolve(root, ".build/ios/swift-shell-tests");
   // No iPhone SDK/target on this command: these pure Swift tests run on CI's Mac.
@@ -134,6 +144,7 @@ if (import.meta.main) {
   if (process.argv[2] !== "--check" && process.argv[2] !== "--prepare" && process.argv[2] !== "--link-check" && process.argv[2] !== "--test-artifact") {
     throw new Error("The native runtime has not passed installation/gameplay validation. Use --check, --link-check or --test-artifact for build verification; no production host receipt is generated.");
   }
+  console.log(await testOverlayGeometry());
   const prepared = [];
   for (const name of Object.keys(adapters)) prepared.push(await prepareIosAdapter(name));
   console.log(`Prepared iOS adapters with ${prepared.reduce((sum, item) => sum + item.reusedModules, 0)} unchanged nxkit source files`);
@@ -145,16 +156,21 @@ if (import.meta.main) {
       // Vendor all lockfile dependencies, including portable validator/test targets.
       await command(["cargo", "fetch", "--locked", "--manifest-path", "ios/Cargo.toml"]);
     }
-    console.log(await command(["cargo", "test", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-host", "--package", "nx2ipa-ios-app", "--lib"]));
+    console.log(await command(["cargo", "test", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-input", "--package", "nx2ipa-ios-host", "--package", "nx2ipa-ios-app", "--lib"]));
     await testSwiftShell();
     process.env.SDKROOT = await command(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]);
     const nativeLibraries = await buildRuntime();
+    const overlay = resolve(root, ".build/ios/gamepad.o");
+    console.log(await command(["xcrun", "--sdk", "iphoneos", "clang", "-fobjc-arc", "-fmodules", "-O2",
+      "-target", "arm64-apple-ios26.0", "-isysroot", process.env.SDKROOT,
+      "-Wall", "-Wextra", "-Wno-unused-parameter", "-Werror=implicit-function-declaration",
+      "-c", "ios/shell/overlay/Gamepad.m", "-o", overlay]));
     const binary = resolve(root, "ios/target/aarch64-apple-ios/release/nx2ipa");
     console.log(await command(["xcrun", "--sdk", "iphoneos", "swiftc", "-swift-version", "6", "-O", "-whole-module-optimization",
       "-target", "arm64-apple-ios26.0", "-sdk", process.env.SDKROOT, "-module-name", "Nx2ipaShell",
-      "-import-objc-header", "ios/app/include/nx2ipa.h", "ios/shell/App.swift", "ios/shell/MetalView.swift", "ios/shell/TouchState.swift",
+      "-import-objc-header", "ios/shell/BridgingHeader.h", "ios/shell/App.swift", "ios/shell/MetalView.swift", "ios/shell/TouchState.swift", "ios/shell/GameMenu.swift", overlay,
       "ios/target/aarch64-apple-ios/release/libnx2ipa_runtime.a", ...nativeLibraries,
-      "-framework", "UIKit", "-framework", "QuartzCore", "-o", binary]));
+      "-framework", "UIKit", "-framework", "QuartzCore", "-framework", "CoreText", "-framework", "GameController", "-o", binary]));
     const build = await command(["xcrun", "vtool", "-show-build", binary]);
     const libraries = await command(["otool", "-L", binary]);
     const arch = await command(["lipo", "-archs", binary]);

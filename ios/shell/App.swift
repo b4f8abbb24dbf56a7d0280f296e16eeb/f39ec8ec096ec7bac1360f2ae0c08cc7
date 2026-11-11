@@ -48,6 +48,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             showError(message.isEmpty ? "The native session could not start." : message, in: controller)
             return
         }
+        view.installOverlay()
         metalView = view
         connected = true
         view.setNeedsLayout()

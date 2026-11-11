@@ -157,12 +157,19 @@ export async function nativeSourceArchive(destination, adapterNames) {
   return { file: 'native-source.tar.gz', sha256: sha(await readFile(archivePath)), provenance };
 }
 
+export async function copyOverlayNotices(app) {
+  await mkdir(join(app, 'ThirdPartyNotices'), { recursive: true });
+  await cp(join(root, 'ios/shell/overlay/LICENSE'), join(app, 'ThirdPartyNotices/NX2Apple.txt'));
+  await cp(join(root, 'ios/shell/overlay/SOURCE.json'), join(app, 'ThirdPartyNotices/NX2Apple-source.json'));
+}
+
 export async function createTestArtifact(binary, evidence, adapterNames, verify) {
   const output = join(root, '.build/ios/test');
   const stage = await mkdtemp(join(dirname(output), '.test-'));
   try {
     const app = join(stage, 'Nx2ipa.app');
     await mkdir(app);
+    await copyOverlayNotices(app);
     const signing = await unsignedCopy(binary, join(app, 'nx2ipa'));
     await cp(join(root, 'ios/Info.plist'), join(app, 'Info.plist'));
     await command(['plutil', '-lint', join(app, 'Info.plist')]);

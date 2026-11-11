@@ -13,6 +13,15 @@ bool nx2ipa_start(void *layer, const char *bundle, const char *home,
 void nx2ipa_set_active(bool active);
 void nx2ipa_resize(uint32_t width, uint32_t height);
 void nx2ipa_touches(const Nx2ipaTouch *points, size_t count);
+// Complete virtual P1 snapshot. Npad bits 0..15: A B X Y L3 R3 L R ZL ZR
+// Plus Minus Left Up Right Down. Unknown bits are discarded. Axes are x-right,
+// y-up, finite [-1, 1]; out-of-range values clamp and nonfinite values become 0.
+// Focus loss/stop releases the pad; background snapshots are ignored.
+void nx2ipa_virtual_pad(uint64_t buttons, float lx, float ly, float rx, float ry);
+// Physical extended-profile gamepads only. Discovery is cached for up to 100 ms.
+bool nx2ipa_has_controller(void);
+// Current nxkit mode, used to offer guest touchscreen controls only in handheld.
+bool nx2ipa_is_handheld(void);
 // Zero means the presenter fills its drawable, not an assumed 16:9 picture.
 double nx2ipa_picture_aspect(void);
 // Pauses then requests process shutdown. Does not unload live guest code/memory.
