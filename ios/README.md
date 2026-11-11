@@ -10,7 +10,7 @@ Implemented:
 - Rust UIKit app entry, scene lifecycle, CAMetalLayer sizing, error display,
   16-point multitouch, GameController/Core Haptics and display-rate policy.
 - Signed guest-dylib loading through dyld only. The host checks ARM64/iOS 26,
-  rejects automatic initializer/dependency commands, validates module segments,
+  rejects automatic initializers and dependencies except libSystem, validates module segments,
   moves addresses by dyld's slide, and reserves non-executable guest memory.
   No JIT or macOS executable-file mapping fallback is used.
 - Real shared guest kernel, imports/relocations, thread gates and SDK boot sequence.

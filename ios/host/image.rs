@@ -44,16 +44,33 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
             }
             platform = true;
         }
-        // An nxgame is data and rewritten code only. dyld must not execute game code before our gates exist.
+        // The pinned writer declares the already-loaded system runtime. No game
+        // library may introduce another dependency before our guest gates exist.
+        if cmd == 0xc {
+            if size < 24 {
+                return Err(bad("truncated dylib dependency"));
+            }
+            let name = word(bytes, at + 8)? as usize;
+            if name < 24 || name >= size {
+                return Err(bad("invalid dylib name offset"));
+            }
+            let name = &bytes[at + name..next];
+            let end = name
+                .iter()
+                .position(|b| *b == 0)
+                .ok_or_else(|| bad("unterminated dylib name"))?;
+            if &name[..end] != b"/usr/lib/libSystem.B.dylib" {
+                return Err(bad("only the system runtime dependency is allowed"));
+            }
+        }
         if cmd == 0x8000001c
-            || cmd == 0xc
             || cmd == 0x80000018
             || cmd == 0x8000001f
             || cmd == 0x20
             || cmd == 0x80000023
         {
             return Err(bad(
-                "guest library must not load dependencies or use rpaths",
+                "guest library must not load extra dependencies or use rpaths",
             ));
         }
         if cmd == 0x19 {
@@ -127,6 +144,33 @@ mod tests {
             b[at..at + 4].copy_from_slice(&v.to_le_bytes());
             assert!(validate(&b).is_err());
         }
+    }
+    fn dependency(name: &[u8]) -> Vec<u8> {
+        let mut b = file();
+        let size = (24 + name.len() + 1).next_multiple_of(8);
+        b[16..20].copy_from_slice(&2u32.to_le_bytes());
+        b[20..24].copy_from_slice(&(24 + size as u32).to_le_bytes());
+        b.extend_from_slice(&0xcu32.to_le_bytes());
+        b.extend_from_slice(&(size as u32).to_le_bytes());
+        b.extend_from_slice(&24u32.to_le_bytes());
+        b.resize(56 + 24, 0);
+        b.extend_from_slice(name);
+        b.resize(56 + size, 0);
+        b
+    }
+    #[test]
+    fn accepts_only_exact_system_dependency() {
+        validate(&dependency(b"/usr/lib/libSystem.B.dylib")).unwrap();
+        for name in [
+            b"@rpath/libSystem.B.dylib".as_slice(),
+            b"/tmp/libSystem.B.dylib",
+            b"/usr/lib/libOther.dylib",
+        ] {
+            assert!(validate(&dependency(name)).is_err());
+        }
+        let mut b = dependency(b"/usr/lib/libSystem.B.dylib");
+        b[64..68].copy_from_slice(&0u32.to_le_bytes());
+        assert!(validate(&b).is_err());
     }
     #[test]
     fn truncated_inputs_never_pass() {
