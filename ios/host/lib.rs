@@ -17,6 +17,7 @@ pub mod pipecache;
 pub mod reloc;
 pub mod settings;
 pub mod stop;
+pub mod tail;
 
 #[cfg(target_os = "ios")]
 pub mod bigstack;

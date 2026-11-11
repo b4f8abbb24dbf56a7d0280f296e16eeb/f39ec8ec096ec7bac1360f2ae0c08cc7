@@ -2,12 +2,19 @@
 import { createCipheriv, createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { unzipSync } from "fflate";
+import jpeg from "jpeg-js";
 import { shaderContainer } from "./fixture.mjs";
 const enc = new TextEncoder();
 const title = 0x0100000000000000n;
 const headerKey = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1));
 const areaKey = Buffer.alloc(16, 0x43), sectionKey = Buffer.alloc(16, 0x71);
 const keys = enc.encode(`header_key = ${headerKey.toString("hex")}\nkey_area_key_application_00 = ${areaKey.toString("hex")}\n`);
+const pixels = new Uint8Array(256 * 256 * 4);
+for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+  pixels[(y * 256 + x) * 4 + (x < 128 ? 0 : 2)] = 255;
+  pixels[(y * 256 + x) * 4 + 3] = 255;
+}
+export const gameIcon = new Uint8Array(jpeg.encode({ width: 256, height: 256, data: pixels }, 90).data);
 const hash = (b) => createHash("sha256").update(b).digest();
 const align = (n, size = 0x200) => Math.ceil(n / size) * size;
 const u32 = (b, o, n) => b.writeUInt32LE(n, o);
@@ -98,11 +105,11 @@ function nca(type, sections, titleId = title) {
   }
   return Buffer.concat([head, ...data]);
 }
-export function containerSample(sample, { update = false, updateOnly = false, wrongPatchTitle = false } = {}) {
+export function containerSample(sample, { update = false, updateOnly = false, wrongPatchTitle = false, icon = gameIcon } = {}) {
   const programId = "11".repeat(16), controlId = "22".repeat(16), metaId = "33".repeat(16);
   const nacp = Buffer.alloc(0x4000); nacp.write("Authored encrypted sample"); nacp.write("Test publisher", 0x200); nacp.write("1.2.3", 0x3060);
   const program = nca(0, [pfsSection([["main", sample.modules[0].data], ["main.npdm", sample.npdm]]), romSection([["message.txt", Buffer.from("encrypted authored resource")], ["shader.bnsh", shaderContainer(sample.shaders[0].code)]])]);
-  const control = nca(2, [romSection([["control.nacp", nacp]])]);
+  const control = nca(2, [romSection([["control.nacp", nacp], ...(icon ? [["icon_AmericanEnglish.dat", icon]] : [])])]);
   const cnmt = Buffer.alloc(0x20 + 0x10 + 2 * 0x38);
   u64(cnmt, 0, title); u32(cnmt, 8, 65536); cnmt[0xc] = 0x80; cnmt.writeUInt16LE(0x10, 0xe); cnmt.writeUInt16LE(2, 0x10);
   [[programId, program, 1], [controlId, control, 3]].forEach(([id, bytes, type], i) => {
@@ -148,6 +155,7 @@ export async function exerciseContainers(run, sample) {
     assert.ok(files[root + "Frameworks/nxgame.dylib"]);
     assert.equal(game.title_id, "0100000000000000");
     assert.deepEqual(files[root + "nxkit/main.npdm"], sample.npdm);
+    assert.deepEqual(files[root + "nxkit/icon.jpg"], gameIcon);
     await assert.rejects(run({ ...input, keys: enc.encode(`header_key = ${"99".repeat(32)}\n`) }), /during extract/);
     await assert.rejects(run({ ...input, keys: enc.encode(`header_key = ${headerKey.toString("hex")}\nkey_area_key_application_00 = ${"99".repeat(16)}\n`) }), /during extract/);
     await assert.rejects(run({ ...input, [kind]: fixture[kind].slice(0, 700) }), /during extract/);

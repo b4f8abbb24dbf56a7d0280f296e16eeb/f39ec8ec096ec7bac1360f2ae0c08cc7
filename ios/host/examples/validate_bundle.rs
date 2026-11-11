@@ -1,5 +1,5 @@
 //! Portable converter/host contract check. Does not execute guest code or trust signatures.
-use nxkit_host::{HostError, Result, bundle, image, layout, macho};
+use nxkit_host::{HostError, Result, bundle, image, layout, macho, tail};
 use std::path::Path;
 fn validate(app: &Path, data: &Path) -> Result<()> {
     let game = bundle::read(app, data)?;
@@ -10,22 +10,33 @@ fn validate(app: &Path, data: &Path) -> Result<()> {
     for module in &game.modules {
         macho::verify(module, &segments)?;
     }
-    let floor = segments.iter().try_fold(0u64, |end, s| {
-        s.vmaddr
-            .checked_add(s.vmsize)
-            .map(|v| end.max(v))
-            .ok_or_else(|| HostError::Memory("Guest segment address overflow".into()))
-    })?;
     // nxkit's preferred base is relocatable and can exceed 39 bits. Only dyld
     // can establish the actual slide; place.rs checks that real mapped layout.
     // Here verify the required span, not a runtime address we cannot observe.
-    if layout::plan(&game, floor)?.all.len >= layout::SPACE_END {
+    if tail::plan(&game, &segments, 0)?.layout.all.len >= layout::SPACE_END {
         return Err(HostError::Memory(
             "Guest span cannot fit the 39-bit address space".into(),
         ));
     }
+    // Exercise the actual converter reservation against the host layout for
+    // every possible 16 KiB slide phase, including the negative slide from the
+    // writer's high preferred base. This is arithmetic, not a dyld load test.
+    let lowest = game
+        .modules
+        .iter()
+        .map(|m| m.start())
+        .min()
+        .ok_or_else(|| HostError::Memory("Guest has no modules".into()))?;
+    let baseline = 0x1_0000_0000i64
+        .checked_sub(i64::try_from(lowest).map_err(|_| {
+            HostError::Memory("Preferred guest address does not fit a slide".into())
+        })?)
+        .ok_or_else(|| HostError::Memory("Guest slide overflow".into()))?;
+    for phase in (0..layout::REGION_ALIGN).step_by(layout::PAGE as usize) {
+        tail::plan(&game, &segments, baseline + phase as i64)?;
+    }
     println!(
-        "Native bundle contract accepted: title {}, {} modules. Actual dyld placement, signing trust, execution and gameplay remain unverified.",
+        "Native bundle contract accepted: title {}, {} modules; all 128 tail slide phases checked. Actual dyld placement, signing trust, execution and gameplay remain unverified.",
         game.title_id,
         game.modules.len()
     );

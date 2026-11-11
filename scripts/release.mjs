@@ -35,6 +35,9 @@ for (const [source, target] of [
   [".build/nxkit/THIRD_PARTY.md", "licenses/nxkit-THIRD_PARTY.md"],
   ["node_modules/zsign-wasm/LICENSE", "licenses/zsign-MIT.txt"],
   ["node_modules/fflate/LICENSE", "licenses/fflate-MIT.txt"],
+  ["node_modules/jpeg-js/LICENSE", "licenses/jpeg-js-BSD-3-Clause.txt"],
+  ["licenses/Apache-2.0.txt", "licenses/jpeg-js-Apache-2.0.txt"],
+  ["node_modules/jpeg-js/lib/decoder.js", "licenses/jpeg-js-decoder.js"],
   ["node_modules/basecoat-css/LICENSE.md", "licenses/basecoat-MIT.txt"],
   ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
   ["README.md", "README.md"],
@@ -42,7 +45,7 @@ for (const [source, target] of [
 // All new bridge/library source and the exact unmodified GPL upstream, once.
 await command([process.platform === "darwin" ? "gtar" : "tar", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner",
   "--exclude=bridge/target", "--exclude=ios/target", "-czf", join(dist, "source.tar.gz"),
-  "src", "bridge", "ios", "scripts", "tests", ".github", "package.json", "bun.lock",
+  "src", "bridge", "ios", "scripts", "tests", "licenses", ".github", "package.json", "bun.lock",
   "rust-toolchain.toml", "nxkit.json", "index.html", "README.md", "THIRD_PARTY_NOTICES.md", ".build/nxkit"]);
 const files = {};
 async function collect(directory, prefix = "") {

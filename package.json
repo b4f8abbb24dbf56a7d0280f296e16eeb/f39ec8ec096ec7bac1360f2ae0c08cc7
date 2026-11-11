@@ -6,7 +6,7 @@
   "exports": "./dist/nx2ipa.js",
   "scripts": {
     "build": "bun scripts/build.mjs",
-    "test": "bun tests/smoke.mjs",
+    "test": "bun tests/smoke.mjs && bun tests/metadata.mjs",
     "test:browser": "bun tests/browser.mjs",
     "source": "bun scripts/source.mjs",
     "build:wasm": "RUSTFLAGS=\"--cap-lints warn\" cargo build --manifest-path bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown",
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "fflate": "0.8.2",
+    "jpeg-js": "0.4.4",
     "zsign-wasm": "0.0.4"
   },
   "devDependencies": {

@@ -69,14 +69,14 @@ async function prepareAdapter(name, crateName, overrides) {
 const adapters = {
   input: ["nxkit-svc-input", { "lib.rs": "ios/input/lib.rs", "sys/mod.rs": "ios/input/platform.rs", "sys/virtual_pad.rs": "ios/input/virtual_pad.rs" }],
   audio: ["nxkit-svc-audio", { "lib.rs": "ios/audio/lib.rs", "sys/au.rs": "ios/audio/output.rs" }],
-  metal: ["nxkit-metal", { "lib.rs": "ios/metal/lib.rs", "present.rs": "ios/metal/present.rs" }],
+  metal: ["nxkit-metal", { "lib.rs": "ios/metal/lib.rs", "present.rs": "ios/metal/present.rs", "vmregion.rs": "ios/metal/vmregion.rs" }],
   coreml: ["nxkit-coreml", { "lib.rs": "ios/coreml/lib.rs" }],
   gpu: ["nxkit-gpu", { "lib.rs": "ios/gpu/lib.rs" }],
   video: ["nxkit-svc-video", { "lib.rs": "ios/video/lib.rs", "backend.rs": "ios/video/backend.rs", "frame.rs": "ios/video/frame.rs", "sys/mod.rs": "ios/video/sys.rs" }],
   system: ["nxkit-svc-system", { "sys.rs": "ios/system/platform.rs" }],
   runtime: ["nxkit-rt", {}],
   "nxb-xlate": ["nxb-xlate", {}],
-  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "api.rs": "ios/host/api.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs", "padding.rs": "ios/host/padding.rs", "kernel_map.rs": "ios/host/kernel_map.rs" }],
+  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "api.rs": "ios/host/api.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs", "padding.rs": "ios/host/padding.rs", "kernel_map.rs": "ios/host/kernel_map.rs", "tail.rs": "ios/host/tail.rs", "sys/mod.rs": "ios/host/sys.rs" }],
 };
 export const prepareIosAdapter = (name) => {
   if (!Object.hasOwn(adapters, name)) throw new Error(`Unknown iOS adapter: ${name}`);

@@ -15,7 +15,12 @@ Implemented:
   rejects automatic initializers and dependencies except libSystem, validates module segments,
   moves addresses by dyld's slide, and reserves non-executable guest memory.
   No JIT or macOS executable-file mapping fallback is used. Interior image
-  padding remains owned by dyld; only the post-image guest tail is newly reserved.
+  padding remains owned by dyld. The converter includes an anonymous RW
+  `__NX_HEAP` segment so dyld reserves the guest tail with the image; the host
+  validates and adopts it without a second allocation. File-backed `__LINKEDIT`
+  stays after the tail and outside the GPU buffer. Older converted games without
+  this reservation must be reconverted for this host. Deploy the rebuilt host
+  and converter together; an old host cannot use the new reservation.
 - Real shared guest kernel, imports/relocations, thread gates and SDK boot sequence.
 - Metal/MetalFX/CoreML and GPU module compositions. CAMetalDisplayLink feeds the
   actual NVN/GPU presentation path. Desktop display-mode control is excluded.
@@ -48,6 +53,13 @@ The Linux Rust check uses `DOCS_RS=1` solely to skip objc2's Objective-C excepti
 helper compilation, since it has no Xcode/Clang. That is not SDK-link evidence.
 Portable tests run with `RUSTFLAGS='--cap-lints warn'` because an unchanged nxkit
 non-ARM documentation lint otherwise prevents the Linux test build.
+
+After rebuilding the bridge WASM and `dist`, `bun tests/tail-contract.mjs`
+checks authored, synthetically signed bundles against the host at every 16 KiB
+slide phase, with default and overridden memory budgets. The optional local
+Apple-silicon test `bun tests/native-tail.mjs` signs a disposable macOS fixture
+and checks dyld's actual anonymous tail mapping in three fresh processes. It is
+not run by CI and does not establish iPhone loading or Metal compatibility.
 
 ## Remaining verification and limitations
 

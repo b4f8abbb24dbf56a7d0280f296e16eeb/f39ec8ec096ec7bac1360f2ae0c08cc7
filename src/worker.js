@@ -1,4 +1,5 @@
-import { zipSync, unzipSync, inflateSync } from "fflate";
+import { zipSync, unzipSync } from "fflate";
+import { nameFromNacp, appIcons, installMetadata } from "./metadata.js";
 import { bridgeWasm, zsignWasm } from "nx2ipa:assets";
 import embeddedHost from "nx2ipa:host";
 import createSigner from "nx2ipa:signer";
@@ -53,24 +54,6 @@ function directory(files, directories, name) {
     index.directories.add(parent);
   }
   directories.add(name);
-}
-function nameFromNacp(bytes) {
-  let names = bytes, count = 16;
-  // New SDKs deflate the language table. Bound expansion to the fixed table.
-  const size = bytes.length > 1 ? bytes[0] | (bytes[1] << 8) : 0;
-  if (size > 0 && size <= 0x2ffe && bytes.length >= size + 2) {
-    try {
-      const inflated = inflateSync(bytes.subarray(2, size + 2), { out: new Uint8Array(0x6000) });
-      if (inflated.length === 0x6000) { names = inflated; count = 32; }
-    } catch { /* Legacy NACP stores plain UTF-8 in the same bytes. */ }
-  }
-  for (let i = 0; i < count; i++) {
-    const field = names.subarray(i * 0x300, i * 0x300 + 0x200);
-    const zero = field.indexOf(0);
-    const name = new TextDecoder().decode(zero < 0 ? field : field.subarray(0, zero)).trim();
-    if (name && !/[\x00-\x1f\x7f\ufffd]/.test(name)) return name;
-  }
-  return undefined;
 }
 function inferModules(modules) {
   // ExeFS physical/PFS0 order is not necessarily the loader's module order.
@@ -425,10 +408,15 @@ self.onmessage = async ({ data: input }) => {
       const gameFile = generated.files.find((file) => file.path === "game.json");
       const game = JSON.parse(text.decode(gameFile.data));
       if (builtInHost) {
+        const icon = resources.find((file) => file.path === "icon.jpg");
+        let icons = [];
+        if (icon) {
+          try { icons = appIcons(icon.data); }
+          catch { warnings.push("The game icon is invalid or exceeds the image limits; the IPA has no game app icon."); }
+        } else warnings.push("No game icon was found in Control metadata; the IPA has no game app icon.");
+        for (const image of icons) add(files, image.path, image.data);
         const plist = files.get("Info.plist");
-        const name = game.name.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-        plist.data = utf8.encode(text.decode(plist.data).replace("<dict>", () =>
-          `<dict><key>CFBundleDisplayName</key><string>${name}</string>`));
+        plist.data = utf8.encode(installMetadata(text.decode(plist.data), game.name, icons.length > 0));
       }
       game.dylib = "Frameworks/nxgame.dylib";
       game.romfs = "nxkit/romfs";

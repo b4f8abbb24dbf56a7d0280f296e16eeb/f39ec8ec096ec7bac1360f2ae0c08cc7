@@ -59,8 +59,21 @@ try {
     if (path.endsWith("/")) await mkdir(destination, { recursive: true });
     else { await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, data); }
   }
-  if (capabilities.embeddedHost)
+  if (capabilities.embeddedHost) {
     assert.equal(await command(["plutil", "-extract", "CFBundleDisplayName", "raw", "-o", "-", join(temporary, "Payload", receipt.appName, "Info.plist")]), displayName);
+    const plist = JSON.parse(await command(["plutil", "-convert", "json", "-o", "-", join(temporary, "Payload", receipt.appName, "Info.plist")]));
+    assert.deepEqual(plist.CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconFiles, ["Nx2ipaGameIcon60x60"]);
+    assert.deepEqual(plist["CFBundleIcons~ipad"].CFBundlePrimaryIcon.CFBundleIconFiles, ["Nx2ipaGameIcon76x76", "Nx2ipaGameIcon83.5x83.5"]);
+    for (const [name, size] of [
+      ["Nx2ipaGameIcon60x60@2x.png", 120], ["Nx2ipaGameIcon60x60@3x.png", 180],
+      ["Nx2ipaGameIcon76x76.png", 76], ["Nx2ipaGameIcon76x76@2x.png", 152],
+      ["Nx2ipaGameIcon83.5x83.5@2x.png", 167],
+    ]) {
+      const bytes = files[root + name], header = new DataView(bytes.buffer, bytes.byteOffset);
+      assert.equal(header.getUint32(16), size); assert.equal(header.getUint32(20), size);
+      assert.equal(bytes[25], 2); // Opaque PNG RGB, not JPEG or RGBA.
+    }
+  }
   console.log(await command(["cargo", "run", "--locked", "--manifest-path", "ios/Cargo.toml", "-p", "nx2ipa-ios-host", "--example", "validate_bundle", "--", join(temporary, "Payload", receipt.appName)]));
   await writeFile(join(artifact, "integration-test.json"), JSON.stringify({
     schema: 1, nativeHostSha256: receipt.binarySha256, librarySha256: sha(await readFile("dist/nx2ipa.js")),

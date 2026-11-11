@@ -78,6 +78,16 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
                 return Err(bad("truncated segment"));
             }
             let sections = word(bytes, at + 64)? as usize;
+            let name = &bytes[at + 8..at + 24];
+            let name = &name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())];
+            if name == b"__NX_HEAP"
+                && (word(bytes, at + 56)? != 3
+                    || word(bytes, at + 60)? != 3
+                    || sections != 0
+                    || word(bytes, at + 68)? != 0)
+            {
+                return Err(bad("guest tail must be plain non-executable RW memory"));
+            }
             if 72usize.checked_add(
                 sections
                     .checked_mul(80)
@@ -97,6 +107,11 @@ pub fn validate(bytes: &[u8]) -> Result<()> {
         }
         if cmd == 0x1a || cmd == 0x11 {
             return Err(bad("LC_ROUTINES_64 is not allowed"));
+        }
+        if cmd == 0x80000034 {
+            return Err(bad(
+                "chained fixups are not supported by the guest tail writer",
+            ));
         }
         at = next;
     }
@@ -178,5 +193,38 @@ mod tests {
         for len in 0..b.len() {
             assert!(validate(&b[..len]).is_err());
         }
+    }
+    #[test]
+    fn guest_tail_cannot_request_executable_pages_or_sections() {
+        let mut bytes = file();
+        bytes[16..20].copy_from_slice(&2u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&96u32.to_le_bytes());
+        bytes.resize(128, 0);
+        bytes[56..60].copy_from_slice(&0x19u32.to_le_bytes());
+        bytes[60..64].copy_from_slice(&72u32.to_le_bytes());
+        bytes[64..73].copy_from_slice(b"__NX_HEAP");
+        bytes[112..116].copy_from_slice(&3u32.to_le_bytes());
+        bytes[116..120].copy_from_slice(&3u32.to_le_bytes());
+        validate(&bytes).unwrap();
+        for (offset, value) in [(112, 7u32), (116, 7), (120, 1), (124, 1)] {
+            let mut malformed = bytes.clone();
+            malformed[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            assert!(validate(&malformed).is_err());
+        }
+        // The shared segment parser stops at NUL, so nonzero name padding must
+        // not bypass the protection check for the same logical segment name.
+        bytes[74] = b'x';
+        bytes[112..116].copy_from_slice(&7u32.to_le_bytes());
+        assert!(validate(&bytes).is_err());
+    }
+    #[test]
+    fn rejects_chained_fixups_before_loading() {
+        let mut bytes = file();
+        bytes[16..20].copy_from_slice(&2u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&40u32.to_le_bytes());
+        bytes.extend_from_slice(&0x80000034u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 8]);
+        assert!(validate(&bytes).is_err());
     }
 }

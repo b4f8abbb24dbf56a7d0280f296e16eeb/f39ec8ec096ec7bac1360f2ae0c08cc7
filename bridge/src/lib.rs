@@ -1,4 +1,5 @@
 //! Small byte-in/byte-out adapter to unmodified nxkit. No filesystem or native host.
+mod guest_tail;
 mod image;
 use image::{layout, manifest, npdm};
 use nxb_pyjson::{Value as J, dumps, parse};
@@ -310,6 +311,7 @@ fn build_runfolder(input: &J) -> Result<J> {
     );
     let mut dylib = image::dylib(&mods)?;
     ios_dylib(&mut dylib)?;
+    guest_tail::install(&mut dylib, &game, main_thread.stack_size as u64)?;
     let mut files = vec![
         file("game.json", dumps(&game).as_bytes()),
         file("main.npdm", &npdm),

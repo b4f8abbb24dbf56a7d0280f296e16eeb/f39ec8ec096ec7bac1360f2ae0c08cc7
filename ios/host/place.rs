@@ -1,7 +1,7 @@
 //! iOS uses dyld's signed executable mappings only. No JIT or executable remapping fallback.
 use crate::memory::GuestMemory;
 use crate::sys::{self, Dylib, Reservation};
-use crate::{Game, HostError, Result, image, layout, macho, memory, padding};
+use crate::{Game, HostError, Result, image, layout, macho, memory, padding, tail};
 use std::io::Read;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,28 +43,21 @@ fn map(game: &Game, dylib: &Dylib) -> Result<(Game, layout::Layout, Reservation)
     for module in &game.modules {
         macho::verify(module, &segments)?;
     }
-    let moved = game.moved(mapped.slide)?;
-    let mut floor = 0;
-    for segment in &segments {
-        floor = floor.max(
-            segment
-                .vmaddr
-                .checked_add_signed(mapped.slide)
-                .and_then(|s| s.checked_add(segment.vmsize))
-                .ok_or_else(|| HostError::Memory("Slid segment range overflow".into()))?,
-        );
-    }
-    let layout = layout::plan(&moved, floor)?;
+    let plan = tail::plan(game, &segments, mapped.slide)?;
+    let layout = plan.layout;
     if !layout.fits_address_space() {
         return Err(HostError::Memory(
             "dyld placed the game outside the 39-bit guest address space".into(),
         ));
     }
     let gaps = padding::gaps(
-        segments.iter().map(|s| (s.vmaddr, s.vmsize)),
+        segments
+            .iter()
+            .filter(|s| s.name != "__NX_HEAP" && s.name != "__LINKEDIT")
+            .map(|s| (s.vmaddr, s.vmsize)),
         mapped.slide,
         layout.all.start,
-        floor,
+        plan.reserved.start,
     )?;
     // dyld's vm_allocate reserves the entire image, then overlays its segments.
     // Nonfixed mmap over its padding fails; MAP_FIXED would steal its mappings.
@@ -76,8 +69,12 @@ fn map(game: &Game, dylib: &Dylib) -> Result<(Game, layout::Layout, Reservation)
         "nx2ipa: retaining {} bytes of dyld padding and leaving {} unmapped/unreported bytes untouched",
         padding.mapped, padding.unreported
     );
-    let res = sys::reserve_tail(layout.all.start, floor, layout.all.end())?;
-    Ok((moved, layout, res))
+    // SAFETY: the mapped commands and actual slide passed the tail contract.
+    // The successful session retains the dylib for the rest of the process;
+    // failed placement closes it only before any guest view is registered.
+    let res =
+        unsafe { sys::adopt_dyld_tail(layout.all.start, plan.reserved.start, layout.all.end())? };
+    Ok((plan.game, layout, res))
 }
 
 pub fn place(game: &Game) -> Result<Placed> {
@@ -85,6 +82,12 @@ pub fn place(game: &Game) -> Result<Placed> {
     let segs = macho::segments(&commands)?;
     for module in &game.modules {
         macho::verify(module, &segs)?;
+    }
+    let plan = tail::plan(game, &segs, 0)?;
+    if plan.layout.all.len >= layout::SPACE_END {
+        return Err(HostError::Memory(
+            "Guest span cannot fit the 39-bit address space".into(),
+        ));
     }
     let images = game
         .modules
