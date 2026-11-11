@@ -62,3 +62,31 @@ non-ARM documentation lint otherwise prevents the Linux test build.
 No command sets `runtimeReady: true` merely because compilation or linking passed.
 The browser's default flow remains blocked until an actual built-in host can be
 validated and embedded; no separate host upload is part of the intended flow.
+
+## Unsigned test artifact
+
+On macOS, `bun scripts/build-ios.mjs --test-artifact` runs the same real SDK
+link checks, then assembles `.build/ios/test/Nx2ipa.app`. It removes only a
+confirmed ad-hoc signature from the copied executable and verifies unsigned
+status with both its load commands and codesign. The original build is untouched.
+
+`host-test.json` records executable/plist/source hashes and SDK evidence. It
+keeps `runtimeReady`, `deviceValidated`, `gameplayValidated`, bundle-contract and
+synthetic-signing validation false. It is not `.build/ios/host.json` and does not
+pass the production gate. No game or credentials are included.
+
+The same artifact includes `native-source.tar.gz`: exact native sources,
+unchanged pinned nxkit source plus offline verification objects, vendored Cargo
+dependencies with licenses (including pinned Git monorepo root licenses), Rust notices and rebuild instructions. Keep the
+source/notices beside any redistributed test host. Apple SDKs are not included.
+
+The portable `validate_bundle` example checks a converter-generated app against
+actual host bundle, guest Mach-O, module-segment and address-layout rules:
+
+```
+cargo run --offline --locked --manifest-path ios/Cargo.toml -p nx2ipa-ios-host \
+  --example validate_bundle -- /absolute/path/Game.app
+```
+
+Success establishes that contract only. It does not execute guest code, verify
+Apple signing trust, establish successful installation or prove gameplay.

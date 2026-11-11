@@ -38,7 +38,8 @@ jobs:
           path: dist/
           if-no-files-found: error
   ios:
-    name: Link the native iOS runtime
+    name: Build and test the native iOS host
+    needs: build
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -47,11 +48,26 @@ jobs:
         with:
           bun-version: '1.4.4'
       - run: rustup toolchain install 1.99.0 --profile minimal --target aarch64-apple-ios
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun scripts/source.mjs
-      - name: Link the real Rust iOS app, loader and GPU against the SDK
-        run: bun tests/native-build.mjs && bun scripts/build-ios.mjs --link-check
+      - uses: actions/download-artifact@v4
+        with:
+          name: nx2ipa-preview
+          path: dist
+      - name: Build an unsigned test host and exact corresponding source
+        run: cargo fetch --locked --manifest-path ios/Cargo.toml && bun tests/native-build.mjs && bun ios/tests/artifact.mjs && bun scripts/build-ios.mjs --test-artifact
         env:
           RUSTFLAGS: --cap-lints warn
+      - name: Test actual host packaging, synthetic signing and native bundle contract
+        run: PATH="$(brew --prefix openssl@3)/bin:$PATH" bun tests/native-host.mjs
+        env:
+          RUSTFLAGS: --cap-lints warn
+      - run: tar -czf .build/ios/native-test-only.tar.gz -C .build/ios test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nx2ipa-native-test-only
+          path: .build/ios/native-test-only.tar.gz
+          if-no-files-found: error
   pages:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build

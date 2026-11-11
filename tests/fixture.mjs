@@ -161,7 +161,8 @@ export function graphicsShaderContainer() {
   return data;
 }
 
-export async function signingFixture() {
+export async function signingFixture(bundleId = "org.example.sample") {
+  if (!/^[A-Za-z0-9.-]+$/.test(bundleId)) throw new Error("Invalid test bundle ID");
   const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -235,7 +236,7 @@ export async function signingFixture() {
     const cert = (await readFile(join(directory, "leaf.der"))).toString("base64");
     await writeFile(
       join(directory, "profile.plist"),
-      `<plist version="1.0"><dict><key>TeamIdentifier</key><array><string>TEST123456</string></array><key>ApplicationIdentifierPrefix</key><array><string>TEST123456</string></array><key>DeveloperCertificates</key><array><data>${cert}</data></array><key>ExpirationDate</key><date>${new Date(Date.now() + 86400000).toISOString()}</date><key>Entitlements</key><dict><key>application-identifier</key><string>TEST123456.org.example.sample</string><key>com.apple.developer.team-identifier</key><string>TEST123456</string><key>get-task-allow</key><true/></dict></dict></plist>`,
+      `<plist version="1.0"><dict><key>TeamIdentifier</key><array><string>TEST123456</string></array><key>ApplicationIdentifierPrefix</key><array><string>TEST123456</string></array><key>DeveloperCertificates</key><array><data>${cert}</data></array><key>ExpirationDate</key><date>${new Date(Date.now() + 86400000).toISOString()}</date><key>Entitlements</key><dict><key>application-identifier</key><string>TEST123456.${bundleId}</string><key>com.apple.developer.team-identifier</key><string>TEST123456</string><key>get-task-allow</key><true/></dict></dict></plist>`,
     );
     command([
       "cms",

@@ -122,6 +122,91 @@ fn merge(j: &mut J, key: &str, extra: Option<&J>) -> Result<()> {
     }
     Ok(())
 }
+// Generic virtual-address budgets, not a claim about available device RAM.
+// The host derives heap = reserve - alias - stack - its 256 MiB front region.
+fn runtime_defaults(npdm: &[u8]) -> Result<(nxtitle::Settings, npdm::MainThread)> {
+    let thread = npdm::main_thread(npdm)?;
+    let mut settings = nxtitle::Settings::DEFAULT;
+    settings.memory = nxtitle::Memory {
+        reserve: 4 << 30,
+        alias: 256 << 20,
+        stack: 256 << 20,
+        app_pool: 3 << 30,
+        used: 64 << 20,
+        system_resource: u32::from_le_bytes(npdm[0x14..0x18].try_into().unwrap()) as u64,
+        map_limit: true,
+        stdalloc_cap: 0,
+        alloc_big_align: false,
+    };
+    Ok((settings, thread))
+}
+
+fn runtime_services(profile: &J) -> Result<Vec<String>> {
+    let known: Vec<_> = nxtitle::Service::ALL.iter().map(|s| s.id()).collect();
+    let services: Vec<String> = if profile.get("services").is_some() {
+        strings(profile, "services")?
+            .into_iter()
+            .map(|s| s.to_ascii_lowercase())
+            .collect()
+    } else {
+        known.iter().map(|s| s.to_string()).collect()
+    };
+    if services
+        .iter()
+        .enumerate()
+        .any(|(i, s)| !known.contains(&s.as_str()) || services[..i].contains(s))
+    {
+        return Err("services must contain unique, known nxkit service IDs".into());
+    }
+    if !services.iter().any(|s| s == "kernel") {
+        return Err("services must include kernel".into());
+    }
+    Ok(services)
+}
+
+fn validate_memory(game: &J, thread: npdm::MainThread) -> Result<()> {
+    let memory = field(game, "memory")?;
+    let number = |key: &str| -> Result<u64> {
+        let value = field(memory, key)?;
+        let parsed = match value {
+            J::Int(n) => u64::try_from(*n).ok(),
+            J::Str(s) => s
+                .strip_prefix("0x")
+                .map_or_else(|| s.parse().ok(), |s| u64::from_str_radix(s, 16).ok()),
+            _ => None,
+        };
+        parsed
+            .filter(|v| *v < (1 << 39))
+            .ok_or_else(|| format!("memory.{key} must be a nonnegative size below 512 GiB"))
+    };
+    let reserve = number("reserve")?;
+    let alias = number("alias")?;
+    let stack = number("stack")?;
+    let heap = reserve
+        .checked_sub(alias)
+        .and_then(|n| n.checked_sub(stack))
+        .and_then(|n| n.checked_sub(256 << 20));
+    if heap.is_none_or(|n| n < 0x20_0000) {
+        return Err("memory.reserve must leave at least 2 MiB for the heap after alias, stack and the 256 MiB front region".into());
+    }
+    let pool = number("app_pool")?;
+    let used = number("mem_used")?;
+    if pool
+        .checked_sub(used)
+        .is_none_or(|free| free < thread.stack_size as u64 + 0x4000)
+    {
+        return Err(
+            "memory.app_pool must cover mem_used and the NPDM main stack plus its guard page"
+                .into(),
+        );
+    }
+    let system = number("sys_resource")?;
+    if !system.is_multiple_of(0x1000) || system > pool {
+        return Err("memory.sys_resource must be page aligned and within app_pool".into());
+    }
+    Ok(())
+}
+
 fn build_runfolder(input: &J) -> Result<J> {
     let p = field(input, "profile")?;
     let declared = list(field(p, "modules")?)?;
@@ -168,6 +253,8 @@ fn build_runfolder(input: &J) -> Result<J> {
     let mods = built.into_iter().zip(bases).collect::<Vec<_>>();
     let npdm = bytes(field(input, "npdm")?)?;
     let title_id = u64::from_str_radix(text(p, "titleId")?, 16).map_err(|_| "invalid titleId")?;
+    let (settings, main_thread) = runtime_defaults(&npdm)?;
+    let services = runtime_services(p)?;
     let manifest = manifest::Manifest {
         title_id,
         name: text(p, "name")?,
@@ -186,9 +273,9 @@ fn build_runfolder(input: &J) -> Result<J> {
         services: vec![],
         nvn_functions: strings(p, "nvnFunctions")?,
         patches: !rules.is_empty(),
-        main_thread: npdm::main_thread(&npdm)?,
+        main_thread,
         aoc: &[],
-        settings: nxtitle::Settings::DEFAULT,
+        settings,
         shared_font_decode: false,
         sf_services: vec![],
         vertex_stream_null_bind: false,
@@ -196,9 +283,10 @@ fn build_runfolder(input: &J) -> Result<J> {
     let mut game = parse(&manifest::game_json(&manifest)).map_err(|e| format!("{e:?}"))?;
     merge(&mut game, "settings", p.get("settings"))?;
     merge(&mut game, "memory", p.get("memory"))?;
+    validate_memory(&game, main_thread)?;
     game.set(
         "services",
-        J::List(strings(p, "services")?.into_iter().map(J::str).collect()),
+        J::List(services.into_iter().map(J::str).collect()),
     );
     let mut dylib = image::dylib(&mods)?;
     ios_dylib(&mut dylib)?;
@@ -397,6 +485,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(response.get("ok"), Some(&J::Bool(false)));
+    }
+    #[test]
+    fn runtime_defaults_and_required_overrides() {
+        let mut npdm = vec![0; 0x80];
+        npdm[..4].copy_from_slice(b"META");
+        npdm[0x14..0x18].copy_from_slice(&0x10000u32.to_le_bytes());
+        npdm[0x1c..0x20].copy_from_slice(&0x100000u32.to_le_bytes());
+        let (settings, thread) = runtime_defaults(&npdm).unwrap();
+        let m = settings.memory;
+        assert_eq!(
+            (m.reserve, m.alias, m.stack, m.app_pool),
+            (4 << 30, 256 << 20, 256 << 20, 3 << 30)
+        );
+        assert_eq!(m.system_resource, 0x10000);
+        assert_eq!(thread.stack_size, 0x100000);
+        assert_eq!(runtime_services(&J::obj([])).unwrap().len(), 9);
+        assert!(runtime_services(&J::obj([("services", J::List(vec![J::str("gpu")]))])).is_err());
+        let mut game = parse(r#"{"memory":{"reserve":4294967296,"alias":268435456,"stack":268435456,"app_pool":3221225472,"mem_used":67108864,"sys_resource":65536}}"#).unwrap();
+        validate_memory(&game, thread).unwrap();
+        merge(&mut game, "memory", Some(&J::obj([("reserve", J::Int(0))]))).unwrap();
+        assert!(validate_memory(&game, thread).is_err());
     }
     #[test]
     fn ios_header_only() {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, lstat, symlink, mkdtemp, rm, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve, relative, join } from "node:path";
 import { command } from "./source.mjs";
+import { createTestArtifact } from "../ios/artifact.mjs";
 
 const root = resolve(import.meta.dir, "..");
 const source = resolve(root, ".build/nxkit");
@@ -95,16 +96,20 @@ export function verifyIosProbe(arch, build, libraries) {
 }
 
 if (import.meta.main) {
-  if (process.argv[2] !== "--check" && process.argv[2] !== "--prepare" && process.argv[2] !== "--link-check") {
-    throw new Error("The native runtime has not passed installation/gameplay validation. Use --check or --link-check for build verification; no production host receipt is generated.");
+  if (process.argv[2] !== "--check" && process.argv[2] !== "--prepare" && process.argv[2] !== "--link-check" && process.argv[2] !== "--test-artifact") {
+    throw new Error("The native runtime has not passed installation/gameplay validation. Use --check, --link-check or --test-artifact for build verification; no production host receipt is generated.");
   }
   const prepared = [];
   for (const name of Object.keys(adapters)) prepared.push(await prepareIosAdapter(name));
   console.log(`Prepared iOS adapters with ${prepared.reduce((sum, item) => sum + item.reusedModules, 0)} unchanged nxkit source files`);
-  if (process.argv[2] === "--link-check") {
+  if (process.argv[2] === "--link-check" || process.argv[2] === "--test-artifact") {
     if (process.platform !== "darwin") throw new Error("The iOS SDK link check requires macOS with Xcode");
     process.env.SDKROOT = await command(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]);
     process.env.IPHONEOS_DEPLOYMENT_TARGET = "26.0";
+    if (process.argv[2] === "--test-artifact") {
+      // Vendor all lockfile dependencies, including portable validator/test targets.
+      await command(["cargo", "fetch", "--locked", "--manifest-path", "ios/Cargo.toml"]);
+    }
     console.log(await command(["cargo", "build", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-app", "--bin", "nx2ipa", "--target", "aarch64-apple-ios", "--release"]));
     const binary = resolve(root, "ios/target/aarch64-apple-ios/release/nx2ipa");
     const build = await command(["xcrun", "vtool", "-show-build", binary]);
@@ -114,6 +119,9 @@ if (import.meta.main) {
     console.log(`Native app architectures: ${JSON.stringify(arch)}\n${build}\n${libraries}`);
     verifyIosProbe(arch, build, libraries);
     console.log("Linked the real Rust iOS app, guest loader/kernel and GPU/service adapters. Installation and gameplay are unverified; no runtimeReady receipt was produced.");
+    if (process.argv[2] === "--test-artifact") {
+      console.log("Unsigned test artifact: " + await createTestArtifact(binary, { architecture: arch, build, libraries }, Object.keys(adapters), verifyIosProbe));
+    }
   }
   if (process.argv[2] === "--check") {
     console.log(await command(["cargo", "check", "--locked", "--manifest-path", "ios/Cargo.toml", "--workspace", "--all-targets", "--target", "aarch64-apple-ios"]));

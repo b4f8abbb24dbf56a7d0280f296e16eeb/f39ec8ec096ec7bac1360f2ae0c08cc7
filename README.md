@@ -2,7 +2,7 @@
 
 One self-contained JavaScript library for browsers and Bun, plus a local drag-and-drop HTML page. A thin WASM bridge uses the unmodified, pinned nxkit fork and npm zsign runtime. No WASM, keys, game data or downloaded source is committed.
 
-**The clean fork does not yet provide a functional iOS host runtime.** The default game + keys flow is blocked until that runtime is built and embedded. Development builds expose `capabilities.embeddedHost === false`; production builds refuse to publish without a real host. A structural test host is not a playable application.
+**The native iOS runtime now links, but is not yet embedded for game conversion.** The default game + keys flow remains disabled. Development builds expose `capabilities.embeddedHost === false`; production builds refuse to publish without a ready host. SDK linking, package validation and synthetic signing do not establish installation or gameplay.
 
 ```js
 import { createIpa, capabilities } from "./nx2ipa.js";
@@ -37,4 +37,4 @@ bun scripts/build.mjs --allow-missing-host # integration tests only
 bun run test
 ```
 
-The release build additionally requires a functional built-in iOS runtime at `.build/ios/host.json` and its app folder. Until the remaining runtime checks pass, CI publishes a clearly marked development preview with game conversion disabled. It tests the same JS in Bun and Chromium and checks SDK linking for the fresh native iOS app, guest kernel/loader and GPU/service adapters. Successful linking is not installation or gameplay evidence. Main builds update GitHub Pages with the preview HTML, JS, licenses and source. Pull requests only validate. Open `dist/nx2ipa.html` directly for offline use.
+The release build additionally requires a functional built-in iOS runtime at `.build/ios/host.json` and its app folder. CI publishes a clearly marked development preview with game conversion disabled and tests the same JS in Bun and Chromium. Its separate native test artifact contains the real unsigned iOS app, exact offline-rebuild sources and explicit validation receipts. The integration test packages an authored NSP with this actual host, checks synthetic host/guest signing and runs the native bundle reader; it does not execute a game or establish Apple signing trust. Main builds update GitHub Pages with the preview HTML, JS, licenses and source. Pull requests only validate. Open `dist/nx2ipa.html` directly for offline use.
