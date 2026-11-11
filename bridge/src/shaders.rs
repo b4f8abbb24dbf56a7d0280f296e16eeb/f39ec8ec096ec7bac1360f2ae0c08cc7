@@ -1,11 +1,12 @@
 //! In-memory orchestration of nxkit's unmodified split, job and compiler APIs.
-use super::{J, Result, bytes, dumps, field, file, list, parse, safe_name, text};
+use super::{
+    INPUT_LIMIT, J, Result, bytes, check_nso_size, dumps, field, file, list, parse, safe_name, text,
+};
 use nxb_split::{jobs, records, scanfile, shaders, src, unity, zstd};
 use nxb_xlate::msl::{self, StageInputs};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-const INPUT_LIMIT: usize = 256 * 1024 * 1024;
 const SHADER_LIMIT: usize = 20000;
 
 struct Owned(Vec<u8>);
@@ -74,26 +75,7 @@ pub(super) fn discover(input: &J) -> Result<J> {
         let name = text(module, "name")?;
         safe_name(name)?;
         let nso = bytes(field(module, "data")?)?;
-        // Bound NSO expansion before upstream allocates its memory image.
-        let end = (0..3)
-            .map(|i| {
-                let at = 0x14 + i * 16;
-                let get = |o| {
-                    nso.get(o..o + 4)
-                        .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as u64)
-                };
-                get(at)
-                    .zip(get(at + 4))
-                    .map(|(a, b)| a + b)
-                    .ok_or("truncated NSO")
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-        if end > INPUT_LIMIT as u64 {
-            return Err("NSO shader scan exceeds 256 MiB".into());
-        }
+        check_nso_size(&nso)?;
         let image = nxb_split::nso::image(&nso).map_err(|e| format!("{name}: {e}"))?;
         if name == "main" {
             common = unity::bundle::common_strings(&image).ok();

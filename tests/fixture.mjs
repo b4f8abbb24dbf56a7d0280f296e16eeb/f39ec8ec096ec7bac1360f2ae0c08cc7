@@ -405,6 +405,13 @@ export async function exercise(run) {
       },
     }),
   );
+  // A small stored NSO can describe a large sparse image. Reject it before
+  // the rewriter allocates that image, including with explicit shader jobs.
+  const sparse = new Uint8Array(2 * 1024 ** 2);
+  sparse.set(request.modules[0].data);
+  new DataView(sparse.buffer).setUint32(0x34, 256 * 1024 ** 2, true);
+  await assert.rejects(run({ ...request, modules: [{ name: "main", data: sparse }] }),
+    /during build\. NSO memory image exceeds 256 MiB/);
   const retried = await run(request);
   assert.deepEqual(retried.ipa, unsigned.ipa);
   console.log(

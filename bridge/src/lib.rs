@@ -8,6 +8,7 @@ mod shaders;
 
 type Result<T> = std::result::Result<T, String>;
 const LIMIT: usize = 512 * 1024 * 1024;
+const INPUT_LIMIT: usize = 256 * 1024 * 1024;
 pub(crate) fn field<'a>(j: &'a J, key: &str) -> Result<&'a J> {
     j.get(key).ok_or_else(|| format!("missing {key}"))
 }
@@ -208,6 +209,23 @@ fn validate_memory(game: &J, thread: npdm::MainThread) -> Result<()> {
     Ok(())
 }
 
+// Check the expanded NSO span before either upstream reader allocates it.
+// BSS is deliberately excluded: the rewriter can preserve it as virtual space.
+fn check_nso_size(nso: &[u8]) -> Result<()> {
+    if nso.starts_with(b"NSO0") {
+        for i in 0..3 {
+            let at = 0x14 + i * 16;
+            let words = nso.get(at..at + 8).ok_or("truncated NSO")?;
+            let offset = u32::from_le_bytes(words[..4].try_into().unwrap()) as u64;
+            let size = u32::from_le_bytes(words[4..].try_into().unwrap()) as u64;
+            if offset + size > INPUT_LIMIT as u64 {
+                return Err("NSO memory image exceeds 256 MiB".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn build_runfolder(input: &J) -> Result<J> {
     let p = field(input, "profile")?;
     let declared = list(field(p, "modules")?)?;
@@ -241,11 +259,12 @@ fn build_runfolder(input: &J) -> Result<J> {
             rules
         },
         |name| {
-            modules
+            let (_, data) = modules
                 .iter()
                 .find(|(n, _)| *n == name)
-                .map(|(_, b)| b.clone())
-                .ok_or_else(|| format!("missing module {name}"))
+                .ok_or_else(|| format!("missing module {name}"))?;
+            check_nso_size(data)?;
+            Ok(data.clone())
         },
         |_| {},
         |_, _, _| {},
