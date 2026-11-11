@@ -1,7 +1,7 @@
 //! iOS uses dyld's signed executable mappings only. No JIT or executable remapping fallback.
 use crate::memory::GuestMemory;
-use crate::sys::{self, Dylib, PROT_RW, Reservation};
-use crate::{Game, HostError, Result, image, layout, macho, memory};
+use crate::sys::{self, Dylib, Reservation};
+use crate::{Game, HostError, Result, image, layout, macho, memory, padding};
 use std::io::Read;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,36 +35,6 @@ fn commands(game: &Game) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn gaps(segs: &[macho::Segment], slide: i64, from: u64, to: u64) -> Result<Vec<(u64, u64)>> {
-    let mut spans = Vec::new();
-    for s in segs {
-        let start = s
-            .vmaddr
-            .checked_add_signed(slide)
-            .ok_or_else(|| HostError::Memory("Slid segment address overflow".into()))?;
-        let end = start
-            .checked_add(s.vmsize)
-            .ok_or_else(|| HostError::Memory("Segment end overflow".into()))?;
-        spans.push((start, end));
-    }
-    spans.sort_unstable();
-    let mut out = Vec::new();
-    let mut cursor = from;
-    for (start, end) in spans {
-        if start > cursor {
-            out.push((cursor, start.min(to) - cursor));
-        }
-        cursor = cursor.max(end);
-        if cursor >= to {
-            break;
-        }
-    }
-    if cursor < to {
-        out.push((cursor, to - cursor));
-    }
-    Ok(out)
-}
-
 fn map(game: &Game, dylib: &Dylib) -> Result<(Game, layout::Layout, Reservation)> {
     let mapped = dylib.image()?;
     let commands = mapped.commands()?;
@@ -90,19 +60,23 @@ fn map(game: &Game, dylib: &Dylib) -> Result<(Game, layout::Layout, Reservation)
             "dyld placed the game outside the 39-bit guest address space".into(),
         ));
     }
-    let gaps = gaps(&segments, mapped.slide, layout.all.start, floor)?;
+    let gaps = padding::gaps(
+        segments.iter().map(|s| (s.vmaddr, s.vmsize)),
+        mapped.slide,
+        layout.all.start,
+        floor,
+    )?;
+    // dyld's vm_allocate reserves the entire image, then overlays its segments.
+    // Nonfixed mmap over its padding fails; MAP_FIXED would steal its mappings.
+    // Padding is unused and excluded from the GPU buffer, so retain it as-is.
+    let padding = padding::inspect(&gaps, |at| {
+        nxkit_metal::vm_region(at).map(|r| (r.start, r.size))
+    })?;
+    eprintln!(
+        "nx2ipa: retaining {} bytes of dyld padding and leaving {} unmapped/unreported bytes untouched",
+        padding.mapped, padding.unreported
+    );
     let res = sys::reserve_tail(layout.all.start, floor, layout.all.end())?;
-    let mut done = Vec::new();
-    for (at, len) in gaps {
-        if let Err(error) = res.map_anon(at, len, PROT_RW) {
-            for (at, len) in done {
-                let _ = res.unmap(at, len);
-            }
-            let _ = res.unmap(floor, layout.all.end() - floor);
-            return Err(error);
-        }
-        done.push((at, len));
-    }
     Ok((moved, layout, res))
 }
 

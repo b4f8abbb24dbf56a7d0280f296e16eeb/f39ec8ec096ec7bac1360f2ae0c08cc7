@@ -76,7 +76,7 @@ const adapters = {
   system: ["nxkit-svc-system", { "sys.rs": "ios/system/platform.rs" }],
   runtime: ["nxkit-rt", {}],
   "nxb-xlate": ["nxb-xlate", {}],
-  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs" }],
+  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs", "padding.rs": "ios/host/padding.rs" }],
 };
 export const prepareIosAdapter = (name) => {
   if (!Object.hasOwn(adapters, name)) throw new Error(`Unknown iOS adapter: ${name}`);

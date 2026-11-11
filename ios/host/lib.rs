@@ -10,6 +10,7 @@ pub mod macho;
 pub mod manifest;
 pub mod module;
 pub mod npdm;
+mod padding;
 pub mod pipecache;
 pub mod reloc;
 pub mod settings;

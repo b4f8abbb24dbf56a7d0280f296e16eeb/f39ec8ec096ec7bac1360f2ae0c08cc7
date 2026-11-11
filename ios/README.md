@@ -12,7 +12,8 @@ Implemented:
 - Signed guest-dylib loading through dyld only. The host checks ARM64/iOS 26,
   rejects automatic initializers and dependencies except libSystem, validates module segments,
   moves addresses by dyld's slide, and reserves non-executable guest memory.
-  No JIT or macOS executable-file mapping fallback is used.
+  No JIT or macOS executable-file mapping fallback is used. Interior image
+  padding remains owned by dyld; only the post-image guest tail is newly reserved.
 - Real shared guest kernel, imports/relocations, thread gates and SDK boot sequence.
 - Metal/MetalFX/CoreML and GPU module compositions. CAMetalDisplayLink feeds the
   actual NVN/GPU presentation path. Desktop display-mode control is excluded.
@@ -90,3 +91,14 @@ cargo run --offline --locked --manifest-path ios/Cargo.toml -p nx2ipa-ios-host \
 
 Success establishes that contract only. It does not execute guest code, verify
 Apple signing trust, establish successful installation or prove gameplay.
+
+## Dyld image padding regression
+
+Apple dyld reserves the full image span before overlaying its file segments
+([dyld-1330 Loader.cpp](https://github.com/apple-oss-distributions/dyld/blob/dyld-1330/dyld/Loader.cpp#L1501-L1617)).
+Attempting another nonfixed mapping in those padding gaps fails because they
+are already allocated. The host now only inspects that padding and leaves its
+mappings and protections unchanged. Genuine holes are not filled, and the GPU
+buffer excludes all image padding. Five portable tests cover reserved padding,
+holes, mixed VM regions, overlapping segments and a negative image slide. This is a source-backed
+loader correction, not evidence that a game has booted on an iPhone.

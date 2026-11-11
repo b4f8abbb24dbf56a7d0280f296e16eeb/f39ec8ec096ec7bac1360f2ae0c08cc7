@@ -107,6 +107,11 @@ fn start_checked(
     let layout = mem.layout;
     let settings = placed.game.settings.clone();
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
+    eprintln!(
+        "nx2ipa: guest GPU span {} bytes; device buffer limit {} bytes",
+        mem.gpu_range().len,
+        ctx.max_buffer_length()
+    );
     let memory = Arc::new(mem.gpu_memory(&ctx)?);
     mem.seal()?;
     nxkit_rt::nxkit_init(mask);
