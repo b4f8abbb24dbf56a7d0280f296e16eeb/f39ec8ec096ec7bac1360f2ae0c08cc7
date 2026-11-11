@@ -105,3 +105,16 @@ mappings and protections unchanged. Genuine holes are not filled, and the GPU
 buffer excludes all image padding. Five portable tests cover reserved padding,
 holes, mixed VM regions, overlapping segments and a negative image slide. This is a source-backed
 loader correction, not evidence that a game has booted on an iPhone.
+
+## Kernel section-map regression
+
+The kernel ABI describes consecutive section sizes, while generated NSO modules
+retain explicit section offsets and may widen DATA downward to a 16 KiB boundary.
+The iOS host now passes separate temporary section descriptors to that unchanged
+ABI. Read-only overlap gives way to the actual writable DATA segment; DATA and
+BSS share one final page rounding, and gaps remain inaccessible. The original
+module metadata still goes to the loader unchanged.
+
+Portable tests exercise the real kernel's `QueryMemory` and
+`SetMemoryPermission`, including the former failure and corrected result. These
+checks do not establish guest execution or device compatibility.

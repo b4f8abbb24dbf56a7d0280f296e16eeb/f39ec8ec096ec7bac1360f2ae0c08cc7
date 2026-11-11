@@ -1,9 +1,9 @@
 //! One process-lifetime game, connected to UIKit and the real nxkit kernel/GPU.
-use crate::{
-    HostError, Result, boot::Boot, bundle, guestsym, loader, pipecache, place, refresh, seams,
-    stop, sys, thread,
-};
 use crate::api::{Paths, Session, Touch};
+use crate::{
+    HostError, Result, boot::Boot, bundle, guestsym, kernel_map, loader, pipecache, place, refresh,
+    seams, stop, sys, thread,
+};
 use nxkit_metal::{Context, DisplayLink, Presenter};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_quartz_core::CAMetalLayer;
@@ -106,6 +106,9 @@ fn start_checked(
     let mem = placed.mem;
     let layout = mem.layout;
     let settings = placed.game.settings.clone();
+    // The unchanged kernel ABI assumes contiguous sections within each record.
+    // Supply disjoint records so real NSO offsets and widened data are preserved.
+    let kernel_game = kernel_map::configuration(&placed.game)?;
     let ctx = Context::system_default().map_err(|e| HostError::App(format!("Metal: {e}")))?;
     eprintln!(
         "nx2ipa: guest GPU span {} bytes; device buffer limit {} bytes",
@@ -115,7 +118,7 @@ fn start_checked(
     let memory = Arc::new(mem.gpu_memory(&ctx)?);
     mem.seal()?;
     nxkit_rt::nxkit_init(mask);
-    sys::kernel_init(thread::guest_thread_entry, &layout, &placed.game)?;
+    sys::kernel_init(thread::guest_thread_entry, &layout, &kernel_game)?;
     seams::register_kernel()?;
     seams::register_server(mask)?;
     seams::init_services(&placed.game, mask)?;

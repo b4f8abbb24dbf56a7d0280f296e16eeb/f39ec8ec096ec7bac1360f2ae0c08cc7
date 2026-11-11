@@ -162,7 +162,7 @@ export function graphicsShaderContainer() {
 }
 
 export async function signingFixture(bundleId = "org.example.sample") {
-  if (!/^[A-Za-z0-9.-]+$/.test(bundleId)) throw new Error("Invalid test bundle ID");
+  if (!/^(?:[A-Za-z0-9-]+\.)*(?:[A-Za-z0-9-]+|\*)$/.test(bundleId)) throw new Error("Invalid test bundle ID");
   const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -385,6 +385,12 @@ export async function exercise(run) {
     assert.deepEqual(credentials, originalCredentials);
   } finally {
     await signing.dispose();
+  }
+  for (const bundleId of ["org.example.different", "org.example.*"]) {
+    const mismatch = await signingFixture(bundleId);
+    try {
+      await assert.rejects(run({ ...request, signing: mismatch }), /explicit provisioning App ID matching org\.example\.sample/);
+    } finally { await mismatch.dispose(); }
   }
   await assert.rejects(run(request, { abortAt: "build" }), { name: "AbortError" });
   await assert.rejects(

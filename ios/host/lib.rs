@@ -6,6 +6,7 @@ pub mod gates;
 pub mod image;
 pub mod input_file;
 pub mod json;
+mod kernel_map;
 pub mod layout;
 pub mod macho;
 pub mod manifest;

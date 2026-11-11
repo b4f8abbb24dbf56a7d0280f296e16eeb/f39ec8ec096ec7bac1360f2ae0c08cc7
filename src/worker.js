@@ -115,18 +115,34 @@ function signedMachO(bytes) {
         length = view.getUint32(at + 12, true);
       if (start + length > bytes.length || length < 12 || view.getUint32(start) !== 0xfade0cc0)
         return false;
+      let cms = false, identifier, applicationId;
       for (let row = 0; row < view.getUint32(start + 8); row++) {
         const index = start + 12 + row * 8;
         if (index + 8 > start + length) return false;
-        const blob = start + view.getUint32(index + 4);
-        if (
-          view.getUint32(index) === 0x10000 &&
-          blob + 8 < start + length &&
-          view.getUint32(blob) === 0xfade0b01 &&
-          view.getUint32(blob + 4) > 8
-        )
-          return true;
+        const slot = view.getUint32(index), blob = start + view.getUint32(index + 4);
+        if (blob + 8 > start + length) return false;
+        const magic = view.getUint32(blob), size = view.getUint32(blob + 4);
+        if (size < 8 || blob + size > start + length) return false;
+        if (slot === 0x10000 && magic === 0xfade0b01 && size > 8) cms = true;
+        if (slot === 0 && magic === 0xfade0c02 && size >= 44) {
+          const offset = blob + view.getUint32(blob + 20), end = bytes.indexOf(0, offset);
+          if (offset < blob + 44 || end < offset || end >= blob + size) return false;
+          identifier = text.decode(bytes.subarray(offset, end));
+        }
+        if (slot === 5 && magic === 0xfade7171) {
+          // Read the root entitlement, not a same-named key in a nested value.
+          let depth = 0;
+          const xml = text.decode(bytes.subarray(blob + 8, blob + size));
+          for (const token of xml.matchAll(/<\/?(?:dict|array)>|<key>application-identifier<\/key>\s*<string>[^.<]+\.([^<]+)<\/string>/g)) {
+            if (token[0][1] === "/") depth--;
+            else if (token[1] !== undefined) { if (depth === 1) applicationId = token[1]; }
+            else depth++;
+          }
+        }
       }
+      if (cms && view.getUint32(12, true) === 2 && (!identifier || applicationId !== identifier))
+        throw new Error(`Signing requires an explicit provisioning App ID matching ${identifier || "the app bundle ID"}; wildcard profiles are not supported`);
+      return cms;
     }
     at += size;
   }
