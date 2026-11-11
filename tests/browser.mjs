@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { exercise, sample } from "./fixture.mjs";
+import { exercise, sample, signingFixture } from "./fixture.mjs";
 import { containerSample } from "./containers.mjs";
+import { unzipSync } from "fflate";
 import { capabilities } from "../dist/nx2ipa.js";
 
 let browser;
@@ -17,11 +18,11 @@ try {
     if (/^https?:/.test(request.url())) network.push(request.url());
   });
   await page.route(/^https?:/, (route) => route.abort());
-  // The real standalone HTML never asks for templates or profiles. A build
+  // The real standalone HTML never asks for runtime templates or game profiles. A build
   // without the required runtime must be visibly blocked, not fake success.
   await page.goto(pathToFileURL(new URL("../dist/nx2ipa.html", import.meta.url).pathname).href);
-  assert.equal(await page.locator("input[type=file]").count(), 1);
-  assert.equal(await page.locator("#template,#profile,#shaders,#identity,#provision").count(), 0);
+  assert.equal(await page.locator("input[type=file]").count(), 3);
+  assert.equal(await page.locator("#template,#profile,#shaders").count(), 0);
   assert.equal(await page.locator("#experimental-notice").isVisible(),
     capabilities.embeddedHost && capabilities.experimental === true);
   if (capabilities.embeddedHost) {
@@ -50,6 +51,46 @@ try {
       if (capabilities.experimental) assert.match(await page.locator("#warnings").textContent(), /Experimental build/);
       assert.match(await page.locator("#keys-name").textContent(), /No prod.keys/);
     }
+    // Use ephemeral, non-Apple-trusted credentials against the actual HTML,
+    // embedded host and worker. No real certificate is used or committed.
+    const signing = await signingFixture("app.nx2ipa.game");
+    try {
+      for (const password of ["wrong", signing.password]) {
+        await page.locator("#files").setInputFiles([
+          { name: "Fixture.nsp", mimeType: "application/octet-stream", buffer: Buffer.from(raw.nsp) },
+          { name: "prod.keys", mimeType: "text/plain", buffer: Buffer.from(raw.keys) },
+        ]);
+        await page.locator("#signing-enabled").check();
+        await page.locator("#identity").setInputFiles({ name: "test.p12", mimeType: "application/octet-stream", buffer: Buffer.from(signing.identity) });
+        await page.locator("#provision").setInputFiles({ name: "test.mobileprovision", mimeType: "application/octet-stream", buffer: Buffer.from(signing.profile) });
+        await page.locator("#signing-password").fill(password);
+        await page.locator("#build").click();
+        await page.waitForFunction(() => document.getElementById("form").getAttribute("aria-busy") === "false");
+        for (const id of ["identity", "provision", "signing-password"])
+          assert.equal(await page.locator(`#${id}`).inputValue(), "");
+        if (password === "wrong") {
+          assert.match(await page.locator("#status").textContent(), /Signing failed/);
+          assert.equal(await page.locator("#download").isVisible(), false);
+        } else {
+          assert.match(await page.locator("#status").textContent(), /^Signed IPA ready/);
+          assert.equal(await page.locator("#result-kind").textContent(), "Signed");
+          assert.match(await page.locator("#download").getAttribute("download"), /-signed\.ipa$/);
+          const data = await page.evaluate(async () => {
+            const bytes = new Uint8Array(await (await fetch(document.getElementById("download").href)).arrayBuffer());
+            let binary = "";
+            for (let at = 0; at < bytes.length; at += 32768)
+              binary += String.fromCharCode(...bytes.subarray(at, at + 32768));
+            return btoa(binary);
+          });
+          const files = unzipSync(new Uint8Array(Buffer.from(data, "base64")));
+          const root = "Payload/Nx2ipa.app/";
+          assert.ok(files[root + "_CodeSignature/CodeResources"]);
+          assert.deepEqual(files[root + "embedded.mobileprovision"], signing.profile);
+          await signing.verify(files[root + "nx2ipa"]);
+          await signing.verify(files[root + "Frameworks/nxgame.dylib"]);
+        }
+      }
+    } finally { await signing.dispose(); }
   } else {
     assert.equal(await page.locator("#runtime-notice").isVisible(), true);
     assert.equal(await page.locator("#build").isDisabled(), true);

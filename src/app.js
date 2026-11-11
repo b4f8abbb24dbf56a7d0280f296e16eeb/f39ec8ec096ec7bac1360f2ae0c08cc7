@@ -2,7 +2,7 @@ import { createIpa, capabilities } from "./index.js";
 
 const $ = (id) => document.getElementById(id);
 const selected = { game: undefined, keys: undefined };
-let controller, outputUrl, generation = 0, dragDepth = 0;
+let controller, outputUrl, clearActiveSecrets, generation = 0, dragDepth = 0;
 const available = capabilities.embeddedHost === true;
 const experimental = available && capabilities.experimental === true;
 const unavailable = "Build unavailable: this version does not include an iOS runtime.";
@@ -22,6 +22,23 @@ const clearOutput = () => {
   $("result").hidden = true;
   $("warnings").replaceChildren();
 };
+const clearSigning = () => {
+  for (const id of ["identity", "provision", "signing-password"]) $(id).value = "";
+};
+const signingProblem = () => {
+  if (!$("signing-enabled").checked) return "";
+  for (const [id, pattern, label] of [
+    ["identity", /\.(p12|pfx)$/i, "a .p12 or .pfx signing identity"],
+    ["provision", /\.mobileprovision$/i, "a .mobileprovision profile"],
+  ]) {
+    const file = $(id).files[0];
+    if (!file) return `Add ${label} to sign the IPA.`;
+    if (!pattern.test(file.name) || !file.size || file.size >= 4 * 1024 ** 2)
+      return `Choose ${label} that is not empty and is under 4 MiB.`;
+  }
+  const password = $("signing-password").value;
+  return password.includes("\0") || password.length > 16384 ? "Invalid certificate password." : "";
+};
 const render = () => {
   for (const kind of ["game", "keys"]) {
     const file = selected[kind];
@@ -30,7 +47,10 @@ const render = () => {
     $(`${kind}-size`).textContent = file ? size(file.size) : "";
     $(`remove-${kind}`).hidden = !file;
   }
-  $("build").disabled = !available || !!controller || !selected.game || !selected.keys;
+  $("signing-enabled").disabled = !!controller;
+  $("signing-fields").hidden = !$("signing-enabled").checked;
+  $("signing-fields").disabled = !!controller || !$("signing-enabled").checked;
+  $("build").disabled = !available || !!controller || !selected.game || !selected.keys || !!signingProblem();
   $("cancel").hidden = !controller;
   $("cancel").disabled = !controller;
   $("progress").hidden = !controller;
@@ -39,12 +59,26 @@ const render = () => {
 const reset = () => {
   generation++;
   controller?.abort();
+  clearActiveSecrets?.();
+  clearActiveSecrets = undefined;
   controller = undefined;
   clearOutput();
 };
-const ready = () => !available ? unavailable : selected.game && selected.keys ? `Ready to create an ${experimental ? "experimental unsigned" : "unsigned"} IPA.`
+const ready = () => !available ? unavailable : selected.game && selected.keys ? signingProblem() || `Ready to create ${experimental ? "an experimental" : $("signing-enabled").checked ? "a" : "an"} ${$("signing-enabled").checked ? "signed" : "unsigned"} IPA.`
   : selected.game ? "Add your prod.keys to continue."
     : selected.keys ? "Add one NSP or XCI to continue." : "Choose your game and keys to get started.";
+
+$("signing-enabled").onchange = () => {
+  reset();
+  if (!$("signing-enabled").checked) clearSigning();
+  render();
+  status(ready());
+};
+for (const id of ["identity", "provision", "signing-password"]) $(id).addEventListener("input", () => {
+  reset();
+  render();
+  status(ready());
+});
 
 function accept(files) {
   if (!files.length) return;
@@ -106,6 +140,7 @@ for (const kind of ["game", "keys"]) $(`remove-${kind}`).onclick = () => {
 $("cancel").onclick = () => {
   reset();
   selected.keys = undefined;
+  clearSigning();
   render();
   status("Cancelled. Add prod.keys to try again.");
   $("dropzone").focus();
@@ -113,6 +148,7 @@ $("cancel").onclick = () => {
 window.addEventListener("pagehide", () => {
   reset();
   selected.game = selected.keys = undefined;
+  clearSigning();
   $("files").value = "";
   render();
   status(ready());
@@ -127,21 +163,41 @@ $("form").onsubmit = async (event) => {
     $("dropzone").focus();
     return;
   }
+  if (signingProblem()) { status(signingProblem(), "error"); return; }
   clearOutput();
   const current = ++generation;
   const game = selected.game;
   let keysFile = selected.keys;
+  let identityFile = $("signing-enabled").checked ? $("identity").files[0] : undefined;
+  let provisionFile = $("signing-enabled").checked ? $("provision").files[0] : undefined;
+  const signing = identityFile ? { password: $("signing-password").value } : undefined;
+  clearSigning();
   const kind = /\.xci$/i.test(game.name) ? "xci" : "nsp";
   controller = new AbortController();
   const { signal } = controller;
   render();
   status("Reading local keys…", "working");
   let keys;
+  const clearSecrets = () => {
+    keys?.fill(0);
+    signing?.identity?.fill(0);
+    signing?.profile?.fill(0);
+    if (signing) signing.password = "";
+    keysFile = identityFile = provisionFile = undefined;
+  };
+  clearActiveSecrets = clearSecrets;
   try {
     keys = new Uint8Array(await keysFile.arrayBuffer());
     keysFile = undefined;
     signal.throwIfAborted();
-    const result = await createIpa({ [kind]: game, keys }, {
+    if (signing) {
+      signing.identity = new Uint8Array(await identityFile.arrayBuffer());
+      signal.throwIfAborted();
+      signing.profile = new Uint8Array(await provisionFile.arrayBuffer());
+      signal.throwIfAborted();
+      identityFile = provisionFile = undefined;
+    }
+    const result = await createIpa({ [kind]: game, keys, ...(signing ? { signing } : {}) }, {
       signal,
       onProgress(stage) {
         if (current !== generation) return;
@@ -162,6 +218,7 @@ $("form").onsubmit = async (event) => {
     const warnings = [...new Set([
       ...(experimental ? ["Experimental build. Successful packaging does not establish installation or gameplay."] : []),
       ...(!result.signed ? ["This IPA is unsigned. Sign it separately with your own valid Apple signing identity and provisioning profile before attempting installation."] : []),
+      ...(result.signed ? ["Cryptographic signing completed. Apple trust, provisioning eligibility and installation have not been verified."] : []),
       "Device compatibility and gameplay have not been verified.",
       ...(Array.isArray(result.warnings) ? result.warnings.filter((warning) => typeof warning === "string") : []),
     ])];
@@ -170,13 +227,13 @@ $("form").onsubmit = async (event) => {
       item.textContent = warning;
       $("warnings").append(item);
     }
-    status(`${result.signed ? "Signed" : "Unsigned"} IPA ready. Local keys cleared.`, "complete");
+    status(`${result.signed ? "Signed" : "Unsigned"} IPA ready. Local keys cleared.${signing ? " Signing credentials cleared." : ""}`, "complete");
     $("download").focus();
   } catch (error) {
-    if (current === generation) status(error.name === "AbortError" ? "Cancelled. Add prod.keys to try again." : `${error.message || "Conversion failed."} Local keys cleared.`, error.name === "AbortError" ? "idle" : "error");
+    if (current === generation) status(error.name === "AbortError" ? "Cancelled. Add your keys and any signing credentials to try again." : `${error.message || "Conversion failed."} Local keys cleared.${signing ? " Signing credentials cleared." : ""}`, error.name === "AbortError" ? "idle" : "error");
   } finally {
-    keys?.fill(0);
-    keysFile = undefined;
+    clearSecrets();
+    if (clearActiveSecrets === clearSecrets) clearActiveSecrets = undefined;
     if (current === generation) {
       selected.keys = undefined;
       controller = undefined;

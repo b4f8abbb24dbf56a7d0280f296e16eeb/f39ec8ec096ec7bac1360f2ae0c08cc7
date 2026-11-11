@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="description" content="Create an unsigned IPA from your own NSP or XCI, locally in your browser." />
+    <meta name="description" content="Create and optionally sign an IPA from your own NSP or XCI, locally in your browser." />
     <title>nx2ipa · Local IPA builder</title>
     <link rel="stylesheet" href="./node_modules/basecoat-css/dist/basecoat.cdn.min.css" />
     <link rel="stylesheet" href="./src/app.css" />
@@ -30,7 +30,7 @@
         </aside>
         <aside id="experimental-notice" class="runtime-notice" role="note" hidden>
           <strong>Experimental build</strong>
-          <p>Creates an unsigned IPA. iOS device compatibility and real gameplay have not been verified. Signing requires your own valid Apple signing identity and provisioning profile, handled separately.</p>
+          <p>iOS device compatibility and real gameplay have not been verified. Optional local signing requires your own valid Apple signing identity and provisioning profile.</p>
         </aside>
         <form id="form" novalidate>
           <div class="card converter">
@@ -61,6 +61,20 @@
                   <button id="remove-keys" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove prod.keys" hidden>×</button>
                 </div>
               </div>
+              <div class="signing">
+                <label class="signing-toggle" for="signing-enabled"><input id="signing-enabled" type="checkbox" aria-controls="signing-fields" />Sign this IPA locally <span class="badge" data-variant="outline">Optional</span></label>
+                <p class="signing-help">Use your own Apple certificate and matching provisioning profile. Nothing is uploaded or saved.</p>
+                <fieldset id="signing-fields" hidden disabled aria-describedby="signing-note">
+                  <legend class="signing-legend">Apple signing credentials</legend>
+                  <label for="identity">Signing identity (.p12 or .pfx)</label>
+                  <input id="identity" class="input" type="file" accept=".p12,.pfx" />
+                  <label for="provision">Provisioning profile (.mobileprovision)</label>
+                  <input id="provision" class="input" type="file" accept=".mobileprovision" />
+                  <label for="signing-password">Certificate password</label>
+                  <input id="signing-password" class="input" type="password" autocomplete="off" maxlength="16384" spellcheck="false" aria-describedby="signing-note" />
+                  <p id="signing-note" class="signing-help">Leave the password blank only if your certificate has no password. Each file must be under 4 MiB. Credentials are cleared after each attempt or cancellation. A signature does not guarantee Apple trust, installation or gameplay.</p>
+                </fieldset>
+              </div>
               <div class="status-area" id="status-area" data-state="idle">
                 <div class="status-line"><span id="status-mark" aria-hidden="true"></span><p id="status" role="status" aria-live="polite" aria-atomic="true">Choose your game and keys to get started.</p></div>
                 <progress id="progress" class="progress" aria-label="Creating IPA" hidden></progress>
@@ -84,9 +98,9 @@
             <summary>Before you build</summary>
             <div>
               <p>Use game backups and keys you have the right to use. Select both files together, or add them one at a time.</p>
-              <p>The IPA is unsigned. Use your own valid Apple signing identity and provisioning profile in a separate signing tool before attempting installation. Signing alone does not establish device compatibility or gameplay.</p>
+              <p>Enable local signing to use your own valid Apple signing identity and matching provisioning profile. Otherwise the IPA is unsigned and must be signed separately before attempting installation. Signing alone does not establish Apple trust, device compatibility or gameplay.</p>
               <p>Game archives are read in chunks. Extracted game data is currently limited to 256 MiB, so larger titles may not build. Extraction checks consistency, not publisher authenticity.</p>
-              <p>Your files stay in this page's memory. Keys are released when a build finishes or is cancelled. Closing the page clears the session.</p>
+              <p>Your files stay in this page's memory. Keys and signing credentials are released when a build finishes or is cancelled. Closing the page clears the session.</p>
             </div>
           </details>
         </div>

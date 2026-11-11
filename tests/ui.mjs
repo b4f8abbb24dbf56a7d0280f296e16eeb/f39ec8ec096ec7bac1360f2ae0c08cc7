@@ -74,8 +74,8 @@ try {
   assert.match(await page.locator("#experimental-notice").textContent(), /real gameplay have not been verified/);
   assert.match(await page.locator("#experimental-notice").textContent(), /valid Apple signing identity/);
   assert.equal(await page.locator("#build-kind").textContent(), "Experimental");
-  assert.equal(await page.locator("input[type=file]").count(), 1);
-  assert.equal(await page.locator("#template,#profile,#shaders,#identity,#provision").count(), 0);
+  assert.equal(await page.locator("input[type=file]").count(), 3);
+  assert.equal(await page.locator("#template,#profile,#shaders").count(), 0);
   assert.equal(await page.locator("#build").isDisabled(), true);
   const chooser = page.waitForEvent("filechooser");
   await page.locator("#dropzone").focus();
@@ -148,7 +148,100 @@ try {
   await page.locator("#remove-game").click();
   assert.match(await page.locator("#game-name").textContent(), /No NSP/);
 
+  // Signing remains opt-in and never silently falls back to unsigned output.
+  await page.locator("#signing-enabled").check();
+  await drop([["Signed.nsp", "game"], ["prod.keys", "test-only"]]);
+  assert.equal(await page.locator("#signing-fields").isVisible(), true);
+  assert.equal(await page.locator("#build").isDisabled(), true);
+  await page.locator("#form").dispatchEvent("submit");
+  assert.equal(await page.evaluate(() => conversions.length), 4);
+  const credential = (name, content = "synthetic") => ({ name, mimeType: "application/octet-stream", buffer: Buffer.from(content) });
+  const selectSigning = async (password = "test-only") => {
+    await page.locator("#identity").setInputFiles(credential("test.p12"));
+    await page.locator("#provision").setInputFiles(credential("test.mobileprovision"));
+    await page.locator("#signing-password").fill(password);
+  };
+  await page.locator("#identity").setInputFiles(credential("bad.txt"));
+  assert.match(await page.locator("#status").textContent(), /Choose a .p12/);
+  await page.locator("#identity").setInputFiles(credential("empty.p12", ""));
+  assert.equal(await page.locator("#build").isDisabled(), true);
+  await page.locator("#identity").setInputFiles({ ...credential("large.p12"), buffer: Buffer.alloc(4 * 1024 ** 2) });
+  assert.equal(await page.locator("#build").isDisabled(), true);
+  await selectSigning();
+  assert.equal(await page.locator("#build").isEnabled(), true);
+  await page.locator("#build").click();
+  await calls(5);
+  assert.equal(await page.locator("#signing-enabled").isDisabled(), true);
+  assert.equal(await page.locator("#signing-password").inputValue(), "");
+  assert.equal(await page.locator("#identity").inputValue(), "");
+  assert.equal(await page.evaluate(() => conversions[4].request.signing.password), "test-only");
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(conversions[4].request.signing.identity)), "synthetic");
+  await settle(4, { signed: true });
+  assert.equal(await page.locator("#result-kind").textContent(), "Signed");
+  assert.match(await page.locator("#download").getAttribute("download"), /-signed\.ipa$/);
+  assert.match(await page.locator("#warnings").textContent(), /Apple trust/);
+  assert.doesNotMatch(await page.locator("#warnings").textContent(), /This IPA is unsigned/);
+  assert.equal(await page.evaluate(() => conversions[4].request.signing.identity.every(byte => byte === 0)), true);
+  assert.equal(await page.evaluate(() => conversions[4].request.signing.profile.every(byte => byte === 0)), true);
+  assert.equal(await page.evaluate(() => conversions[4].request.signing.password), "");
+  assert.equal(await page.locator("#build").isDisabled(), true);
+
+  await drop([["prod.keys", "test-only"]]);
+  await selectSigning("wrong");
+  await page.locator("#build").click();
+  await calls(6);
+  await page.evaluate(() => conversions[5].reject(new Error("Signing failed")));
+  await page.waitForFunction(() => document.getElementById("status").textContent.includes("Signing failed"));
+  assert.equal(await page.locator("#download").isVisible(), false);
+  assert.equal(await page.evaluate(() => conversions[5].request.signing.identity.every(byte => byte === 0)), true);
+  assert.equal(await page.evaluate(() => conversions[5].request.signing.password), "");
+
+  await drop([["prod.keys", "test-only"]]);
+  await selectSigning(""); // Unencrypted PKCS#12 files may have an empty password.
+  await page.locator("#build").click();
+  await calls(7);
+  await page.locator("#cancel").click();
+  assert.equal(await page.evaluate(() => conversions[6].options.signal.aborted), true);
+  assert.equal(await page.evaluate(() => conversions[6].request.signing.identity.every(byte => byte === 0)), true);
+  assert.equal(await page.evaluate(() => conversions[6].request.signing.profile.every(byte => byte === 0)), true);
+  await settle(6, { signed: true });
+  assert.equal(await page.locator("#download").isVisible(), false);
+  await selectSigning();
+  await page.locator("#signing-enabled").uncheck();
+  assert.equal(await page.locator("#signing-password").inputValue(), "");
+  assert.equal(await page.locator("#provision").inputValue(), "");
+  assert.equal(await page.locator("#signing-fields").isVisible(), false);
+
+  // Abort while each credential file is still being read, before worker dispatch.
+  for (const name of ["test.p12", "test.mobileprovision"]) {
+    await page.locator("#signing-enabled").check();
+    await drop([["prod.keys", "test-only"]]);
+    await selectSigning();
+    await page.evaluate((name) => {
+      globalThis.originalFileRead = File.prototype.arrayBuffer;
+      globalThis.releaseCredentialRead = undefined;
+      File.prototype.arrayBuffer = async function () {
+        const bytes = await originalFileRead.call(this);
+        if (this.name === name) {
+          globalThis.pendingCredentialBytes = new Uint8Array(bytes);
+          await new Promise(resolve => { globalThis.releaseCredentialRead = resolve; });
+        }
+        return bytes;
+      };
+    }, name);
+    await page.locator("#build").click();
+    await page.waitForFunction(() => typeof releaseCredentialRead === "function");
+    await page.locator("#cancel").click();
+    await page.evaluate(() => { releaseCredentialRead(); File.prototype.arrayBuffer = originalFileRead; });
+    await page.waitForFunction(() => pendingCredentialBytes.every(byte => byte === 0));
+    assert.equal(await page.evaluate(() => conversions.length), 7);
+    assert.equal(await page.locator("#download").isVisible(), false);
+    assert.equal(await page.locator("#signing-password").inputValue(), "");
+  }
+
   // Responsive layout, contrast mode, and bfcache/session cleanup.
+  await page.locator("#signing-enabled").check();
+  await selectSigning();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
@@ -158,6 +251,9 @@ try {
   assert.equal(await page.locator("#build").isDisabled(), true);
   assert.match(await page.locator("#keys-name").textContent(), /No prod.keys/);
   assert.match(await page.locator("#game-name").textContent(), /No NSP/);
+  assert.equal(await page.locator("#identity").inputValue(), "");
+  assert.equal(await page.locator("#provision").inputValue(), "");
+  assert.equal(await page.locator("#signing-password").inputValue(), "");
   const blocked = await browser.newPage();
   await blocked.addInitScript(() => { globalThis.testEmbeddedHost = false; });
   await blocked.goto(pathToFileURL(join(directory, "index.html")).href);
@@ -177,7 +273,7 @@ try {
   await stable.close();
   assert.deepEqual(errors, []);
   assert.deepEqual(network, []);
-  console.log("UI: drag/drop, keyboard selection, atomic validation, stale completion, cancellation, key cleanup, mobile, experimental/missing-host notices and offline checks passed.");
+  console.log("UI: drag/drop, keyboard selection, atomic validation, stale completion, cancellation, optional signing, credential cleanup, mobile, experimental/missing-host notices and offline checks passed.");
 } finally {
   await browser?.close();
   await rm(directory, { recursive: true, force: true });
