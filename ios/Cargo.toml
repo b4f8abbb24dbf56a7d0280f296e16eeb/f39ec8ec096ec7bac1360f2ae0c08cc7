@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["input", "audio", "shell"]
+members = ["input", "audio", "shell", "video", "system", "metal", "coreml", "gpu", "runtime", "host", "app"]
 
 [workspace.dependencies]
 nxkit-abi = { path = "../.build/nxkit/crates/nxkit-abi" }
@@ -15,6 +15,35 @@ objc2-quartz-core = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd9
 objc2-audio-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-audio-types = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-avf-audio = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+
+objc2-metal = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-metal-fx = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-io-surface = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-ml = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-video = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-core-media = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+objc2-video-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+block2 = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
+nxb-model = { path = "../.build/nxkit/crates/nxb-model" }
+nxkit-hos = { path = "../.build/nxkit/crates/nxkit-hos" }
+nxkit-nvn = { path = "../.build/nxkit/crates/nxkit-nvn" }
+nxkit-native-plan = { path = "../.build/nxkit/crates/nxkit-native-plan" }
+nxkit-ndsr = { path = "../.build/nxkit/crates/nxkit-ndsr" }
+nxkit-ndve = { path = "../.build/nxkit/crates/nxkit-ndve" }
+nxkit-svc-fs = { path = "../.build/nxkit/crates/nxkit-svc-fs" }
+nxkit-svc-offline = { path = "../.build/nxkit/crates/nxkit-svc-offline" }
+nxkit-svc-pacing = { path = "../.build/nxkit/crates/nxkit-svc-pacing" }
+nxkit-ipc = { path = "../.build/nxkit/crates/nxkit-ipc" }
+nxtitle = { path = "../.build/nxkit/titles/nxtitle" }
+nxkit-svc-input = { package = "nx2ipa-ios-input", path = "input" }
+nxkit-svc-audio = { package = "nx2ipa-ios-audio", path = "audio" }
+nxkit-svc-video = { package = "nx2ipa-ios-video", path = "video" }
+nxkit-svc-system = { package = "nx2ipa-ios-system", path = "system" }
+nxkit-metal = { package = "nx2ipa-ios-metal", path = "metal" }
+nxkit-gpu = { package = "nx2ipa-ios-gpu", path = "gpu" }
+nxkit-coreml = { package = "nx2ipa-ios-coreml", path = "coreml" }
+nxkit-rt = { package = "nx2ipa-ios-rt", path = "runtime" }
+nxkit-host = { package = "nx2ipa-ios-host", path = "host" }
 
 [profile.release]
 opt-level = "s"

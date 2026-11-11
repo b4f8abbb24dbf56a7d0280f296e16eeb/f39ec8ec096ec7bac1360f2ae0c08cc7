@@ -1,0 +1,26 @@
+[package]
+name = "nx2ipa-ios-rt"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_rt"
+path = "../../.build/ios/runtime/src/lib.rs"
+
+[dependencies]
+nxb-model.workspace = true
+nxkit-abi.workspace = true
+nxkit-hos.workspace = true
+nxkit-nvn.workspace = true
+nxkit-svc-fs.workspace = true
+nxkit-svc-offline.workspace = true
+nxkit-svc-input.workspace = true
+nxkit-svc-video.workspace = true
+nxkit-svc-audio.workspace = true
+nxkit-svc-pacing.workspace = true
+nxkit-svc-system.workspace = true
+
+[dev-dependencies]
+nxtitle.workspace = true

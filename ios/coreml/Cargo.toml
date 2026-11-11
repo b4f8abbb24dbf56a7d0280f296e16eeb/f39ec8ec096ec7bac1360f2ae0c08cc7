@@ -1,0 +1,27 @@
+[package]
+name = "nx2ipa-ios-coreml"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_coreml"
+path = "../../.build/ios/coreml/src/lib.rs"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2 = { workspace = true, features = ["std"] }
+objc2 = { workspace = true, features = ["std", "exception"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-ml = { workspace = true, features = [
+    "std", "block2", "objc2-core-video",
+    "MLModel", "MLModelConfiguration", "MLModel_MLModelCompilation", "MLFeatureProvider", "MLDictionaryFeatureProvider",
+    "MLFeatureValue", "MLMultiArray", "MLPredictionOptions", "MLModelDescription", "MLFeatureDescription",
+    "MLMultiArrayConstraint", "MLComputePlan", "MLComputePlanDeviceUsage", "MLComputeDeviceProtocol",
+    "MLNeuralEngineComputeDevice", "MLGPUComputeDevice", "MLCPUComputeDevice", "MLModelStructure",
+    "MLModelStructureProgram", "MLModelStructureProgramFunction", "MLModelStructureProgramBlock",
+    "MLModelStructureProgramOperation",
+] }
+objc2-core-video = { workspace = true, features = ["std", "objc2", "objc2-io-surface", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVReturn"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSDictionary", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSValue"] }
+objc2-io-surface = { workspace = true, features = ["std", "IOSurfaceRef", "objc2", "objc2-core-foundation"] }

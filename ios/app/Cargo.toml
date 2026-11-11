@@ -1,0 +1,12 @@
+[package]
+name = "nx2ipa-ios-app"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+[[bin]]
+name = "nx2ipa"
+path = "src/main.rs"
+[target.'cfg(target_os = "ios")'.dependencies]
+nxkit-host.workspace = true
+nx2ipa-ios-shell = { path = "../shell" }

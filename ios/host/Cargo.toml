@@ -1,0 +1,31 @@
+[package]
+name = "nx2ipa-ios-host"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_host"
+path = "../../.build/ios/host/src/lib.rs"
+
+[dependencies]
+nxkit-abi.workspace = true
+nxkit-rt.workspace = true
+nxkit-hos.workspace = true
+nxkit-ipc.workspace = true
+nxkit-svc-fs.workspace = true
+nxkit-svc-offline.workspace = true
+nxkit-svc-input.workspace = true
+nxkit-svc-video.workspace = true
+nxkit-svc-audio.workspace = true
+nxkit-svc-pacing.workspace = true
+nxkit-svc-system.workspace = true
+nxkit-nvn.workspace = true
+nxkit-metal.workspace = true
+nxkit-gpu.workspace = true
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSLocale", "NSNotification", "NSObject", "NSProcessInfo", "NSString"] }
+objc2-quartz-core = { workspace = true, features = ["std", "CAMetalLayer"] }
+nx2ipa-ios-shell = { path = "../shell" }

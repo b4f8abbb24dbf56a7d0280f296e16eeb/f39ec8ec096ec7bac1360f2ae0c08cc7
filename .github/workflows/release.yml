@@ -38,7 +38,7 @@ jobs:
           path: dist/
           if-no-files-found: error
   ios:
-    name: Check the native iOS platform adapters
+    name: Link the native iOS runtime
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -48,7 +48,7 @@ jobs:
           bun-version: '1.4.4'
       - run: rustup toolchain install 1.99.0 --profile minimal --target aarch64-apple-ios
       - run: bun scripts/source.mjs
-      - name: Link the UIKit, input and audio probe against the iOS SDK
+      - name: Link the real Rust iOS app, loader and GPU against the SDK
         run: bun tests/native-build.mjs && bun scripts/build-ios.mjs --link-check
         env:
           RUSTFLAGS: --cap-lints warn

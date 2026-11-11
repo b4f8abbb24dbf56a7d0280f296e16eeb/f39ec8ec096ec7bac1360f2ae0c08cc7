@@ -1,0 +1,18 @@
+[package]
+name = "nx2ipa-ios-video"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+[lib]
+name = "nxkit_svc_video"
+path = "../../.build/ios/video/src/lib.rs"
+[dependencies]
+nxkit-abi = { workspace = true }
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-media = { workspace = true, features = ["std", "objc2", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
+objc2-core-video = { workspace = true, features = ["std", "objc2", "objc2-metal", "CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVReturn"] }
+objc2-metal = { workspace = true, features = ["default"] }
+objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTDecompressionSession", "VTErrors", "VTUtilities"] }

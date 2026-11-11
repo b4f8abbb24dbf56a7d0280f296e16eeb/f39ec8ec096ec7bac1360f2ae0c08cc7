@@ -1,52 +1,64 @@
-# Fresh Rust iOS boundary
+# Fresh Rust iOS runtime
 
-This directory is new nx2ipa code. It does **not** contain the old host or its
-patch stack. The pinned `.build/nxkit` checkout is never rewritten.
+This is downstream nx2ipa code, not the legacy host or its patch stack. The
+pinned `.build/nxkit` checkout is never rewritten. Reused modules are unchanged;
+new crate compositions and platform implementations are explicit adaptations,
+not claims that upstream itself supports iOS.
 
-Implemented and iOS-arm64 type-checked:
+Implemented:
 
-- Rust UIKit scene lifecycle, CAMetalLayer sizing, explicit session ownership,
-  startup error display, and separate writable save/cache paths.
-- A thin input crate selecting the existing GameController/Core Haptics backend.
-- A fresh RemoteIO output module selecting 48 kHz stereo float output. The mixer,
-  audio services, controller logic and haptics remain upstream modules.
+- Rust UIKit app entry, scene lifecycle, CAMetalLayer sizing, error display,
+  16-point multitouch, GameController/Core Haptics and display-rate policy.
+- Signed guest-dylib loading through dyld only. The host checks ARM64/iOS 26,
+  rejects automatic initializer/dependency commands, validates module segments,
+  moves addresses by dyld's slide, and reserves non-executable guest memory.
+  No JIT or macOS executable-file mapping fallback is used.
+- Real shared guest kernel, imports/relocations, thread gates and SDK boot sequence.
+- Metal/MetalFX/CoreML and GPU module compositions. CAMetalDisplayLink feeds the
+  actual NVN/GPU presentation path. Desktop display-mode control is excluded.
+- VideoToolbox VP9/hardware AV1 decode with explicit unsupported-format/device
+  errors. There is no bundled software AV1 fallback.
+- RemoteIO stereo audio, foreground gating, independent interruption state,
+  asynchronous route/interruption recovery, and callback lifetime protection.
+- Canonical bundle asset validation and separate sandbox save/temp/cache paths.
+  The app never write-probes its signed bundle. Explicit empty RomFS metadata
+  can materialize an empty private directory.
 
-`bun scripts/build-ios.mjs --prepare` assembles separate input/audio module trees
-under `.build/ios`. Every reused file is verified against the pinned Git blob
-before linking it. Only `ios/input/platform.rs` and `ios/audio/output.rs` replace
-platform-boundary modules in those **separate** trees. Their manifests record
-all source hashes. No generated text substitutions or source patches are used.
-The 48 reused source modules retain their upstream license.
+## Build and evidence
 
-`bun scripts/build-ios.mjs --check` type-checks the complete adapter workspace
-for `aarch64-apple-ios`, then runs its portable tests. Rust 1.99 and the iOS target
-standard library are required. On a Mac with Xcode,
-`bun scripts/build-ios.mjs --link-check` builds the explicitly named `link_probe`
-example and checks that it is an arm64 iOS binary without AppKit. That example
-contains **no game runtime**, is not a template, and is never embedded by release.
+`bun scripts/build-ios.mjs --prepare` assembles separate module trees under
+`.build/ios`. Each shared file is verified against the pinned Git blob first.
+`source.json` receipts list unchanged source hashes and explicit adapter hashes.
+The auxiliary nxb-xlate tree supplies unchanged GPU test fixtures. No source text
+substitutions are performed, and no generated native binary is committed.
 
-## Still required for NSP/XCI + keys -> runnable IPA
+`--check` type-checks all iOS workspace targets and runs portable tests.
+On macOS with Xcode, `--link-check` builds the **real** `nx2ipa` app executable,
+including its loader/kernel/GPU, and checks ARM64, iOS 26.0 and absence of AppKit.
+It no longer tests only the earlier `link_probe` example. The command does not
+produce a production readiness receipt.
 
-The upstream host crate gates its loader/startup on macOS. Its GPU, Metal and
-Core ML crate roots also exclude iOS. Building a UIKit front end cannot remove
-those constraints. A real native session must still supply:
+On 2026-11-11 the whole workspace passed Rust 1.99 ARM64 iOS all-target checks.
+The Linux check used `DOCS_RS=1` solely to skip objc2's Objective-C exception
+helper compilation, since it has no Xcode/Clang. That is not SDK-link evidence.
+Portable tests run with `RUSTFLAGS='--cap-lints warn'` because an unchanged nxkit
+non-ARM documentation lint otherwise prevents the Linux test build.
 
-1. An iOS loader/kernel/gate startup using dyld-accepted signed code, with no
-   executable-file fallback and no writes to the signed application bundle.
-2. Downstream Metal/GPU/video adapters that compile unchanged shared modules and
-   replace only platform boundaries. Desktop display mode APIs are not iOS APIs.
-3. Writable save/temp/cache routing, app suspension/resume, audio-session
-   interruption/route recovery, touch/controller integration and safe shutdown.
-4. A real iPhoneOS SDK link, provisioning/signing checks, and device execution.
-   Compilation or packaging alone is not gameplay evidence.
+## Remaining verification and limitations
 
-The shell's `SessionFactory` is the integration point. It has no fake default
-implementation. The default build refuses to create a host, and the adapter
-checks never write `.build/ios/host.json` or set `runtimeReady: true`.
+- Full runtime SDK linking is a separate gate from the earlier green shell probe.
+- No physical iPhone install or guest/gameplay run has been verified. Signing,
+  provisioning, address-space/memory limits and device GPU/codec support matter.
+- Automatic shader discovery/conversion must supply the resources under
+  `nxkit/shaders`; native linking cannot replace missing game shader assets.
+- The shared kernel has process-lifetime state and detached guest threads. One
+  game is allowed per process. Scene disconnect pauses UI/audio and requests
+  process shutdown; it does not unsafely unmap guest memory or unload live code.
+- Maximum FPS is not proof of adaptive refresh. The initial display-link policy
+  is fixed-rate unless adaptive capability is independently established.
+- Physical touches, controllers, audio routes/interruption/resume, decoding,
+  Metal frame delivery and memory pressure all require device testing.
 
-## Current evidence
-
-The input/audio/shell workspace passed Rust 1.99 `aarch64-apple-ios` type-check
-on 2026-11-11. Its 116 portable tests passed: 109 input, 5 audio and 2 path tests.
-That is not device evidence. The iPhoneOS SDK link probe and device execution
-remain separate checks.
+No command sets `runtimeReady: true` merely because compilation or linking passed.
+The browser's default flow remains blocked until an actual built-in host can be
+validated and embedded; no separate host upload is part of the intended flow.

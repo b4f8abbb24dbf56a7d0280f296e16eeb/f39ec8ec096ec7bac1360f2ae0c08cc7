@@ -5,7 +5,7 @@ fn main() {
     // Apple framework references as well as the UIKit shell. No guest is run.
     std::hint::black_box(nxkit_svc_input::exports());
     std::hint::black_box(nxkit_svc_audio::exports());
-    if let Err(error) = nx2ipa_ios_shell::run(|_, _| {
+    if let Err(error) = nx2ipa_ios_shell::run(|_, _, _| {
         Err("Native adapter link probe only. No game runtime is linked.".into())
     }) {
         eprintln!("{error}");

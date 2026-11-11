@@ -1,0 +1,20 @@
+[package]
+name = "nx2ipa-ios-gpu"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_gpu"
+path = "../../.build/ios/gpu/src/lib.rs"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+nxkit-coreml = { package = "nx2ipa-ios-coreml", path = "../coreml" }
+nxkit-metal = { package = "nx2ipa-ios-metal", path = "../metal" }
+nxkit-native-plan = { workspace = true }
+nxkit-ndsr = { workspace = true }
+nxkit-ndve = { workspace = true }
+nxkit-nvn = { workspace = true }
+nxkit-svc-video = { package = "nx2ipa-ios-video", path = "../video" }
+foldhash = "0.2"

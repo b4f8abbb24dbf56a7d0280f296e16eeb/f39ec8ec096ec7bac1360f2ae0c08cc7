@@ -1,0 +1,12 @@
+[package]
+name = "nx2ipa-ios-system"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+[lib]
+name = "nxkit_svc_system"
+path = "../../.build/ios/system/src/lib.rs"
+[dependencies]
+nxkit-abi = { workspace = true }
+libc = "0.2"

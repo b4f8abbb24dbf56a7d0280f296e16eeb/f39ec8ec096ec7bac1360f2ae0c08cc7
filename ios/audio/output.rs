@@ -5,6 +5,22 @@
 /// The mixer's realtime callback: interleaved stereo 48 kHz float32.
 pub type Fill = Box<dyn FnMut(&mut [f32]) + Send>;
 
+/// Foreground intent and the system interruption gate are independent: a focus
+/// notification must never override an interruption still in progress.
+#[derive(Clone, Copy)]
+#[cfg(any(target_os = "ios", test))]
+struct PlaybackIntent {
+    active: bool,
+    interrupted: bool,
+}
+#[cfg(any(target_os = "ios", test))]
+impl PlaybackIntent {
+    const fn should_play(self) -> bool {
+        self.active && !self.interrupted
+    }
+}
+
+#[cfg(any(target_os = "ios", test))]
 fn sample_count(frames: u32, buffers: u32, channels: u32, bytes: u32) -> Option<usize> {
     if buffers != 1 || channels != 2 || bytes % 4 != 0 {
         return None;
@@ -15,7 +31,7 @@ fn sample_count(frames: u32, buffers: u32, channels: u32, bytes: u32) -> Option<
 
 #[cfg(target_os = "ios")]
 mod device {
-    use super::{Fill, sample_count};
+    use super::{Fill, PlaybackIntent, sample_count};
     use objc2_audio_toolbox::{
         AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance,
         AudioComponentInstanceDispose, AudioComponentInstanceNew, AudioOutputUnitStart,
@@ -26,6 +42,161 @@ mod device {
     use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
     use std::ffi::c_void;
     use std::ptr::NonNull;
+    use std::sync::Mutex;
+
+    // Keep the established notification API supported by the iOS deployment
+    // floor rather than link replacement notifications from a newer SDK.
+    #[allow(deprecated)]
+    mod notifications {
+        use block2::RcBlock;
+        use objc2::{msg_send, rc::Retained};
+        use objc2_avf_audio::{
+            AVAudioSession, AVAudioSessionInterruptionNotification,
+            AVAudioSessionInterruptionOptionKey, AVAudioSessionInterruptionTypeKey,
+            AVAudioSessionRouteChangeNotification, AVAudioSessionRouteChangeReasonKey,
+        };
+        use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue, NSString};
+        use std::{ptr::NonNull, sync::Once};
+
+        fn number(notification: &NSNotification, key: &NSString) -> Option<usize> {
+            let info = notification.userInfo()?;
+            let value = info.objectForKey(key)?;
+            // Apple's session notification contract specifies NSNumber values.
+            Some(unsafe { msg_send![&*value, unsignedIntegerValue] })
+        }
+
+        fn enqueue(interrupted: Option<bool>) {
+            // Always enqueue, including when the notification arrived on main.
+            // Never reenter the control lock during setCategory/setActive.
+            NSOperationQueue::mainQueue().addOperationWithBlock(&RcBlock::new(move || {
+                let result = match interrupted {
+                    Some(value) => super::set_interrupted(value),
+                    None => super::route_changed(),
+                };
+                if let Err(error) = result {
+                    eprintln!("nx2ipa audio: {error}");
+                }
+            }));
+        }
+
+        pub fn install() {
+            static INSTALLED: Once = Once::new();
+            INSTALLED.call_once(|| unsafe {
+                let center = NSNotificationCenter::defaultCenter();
+                let session = AVAudioSession::sharedInstance();
+                let interruption = center.addObserverForName_object_queue_usingBlock(
+                    Some(AVAudioSessionInterruptionNotification),
+                    Some(&session),
+                    None,
+                    &RcBlock::new(|notification: NonNull<NSNotification>| {
+                        let notification = notification.as_ref();
+                        match number(notification, AVAudioSessionInterruptionTypeKey) {
+                            Some(1) => enqueue(Some(true)),
+                            Some(0)
+                                if number(notification, AVAudioSessionInterruptionOptionKey)
+                                    .is_some_and(|options| options & 1 != 0) =>
+                            {
+                                enqueue(Some(false))
+                            }
+                            _ => {}
+                        }
+                    }),
+                );
+                let route = center.addObserverForName_object_queue_usingBlock(
+                    Some(AVAudioSessionRouteChangeNotification),
+                    Some(&session),
+                    None,
+                    &RcBlock::new(|notification: NonNull<NSNotification>| {
+                        // Ignore our own category changes (3) and unknown (0).
+                        // Only actual route/configuration changes need a restart.
+                        if number(notification.as_ref(), AVAudioSessionRouteChangeReasonKey)
+                            .is_some_and(|reason| reason != 0 && reason != 3)
+                        {
+                            enqueue(None);
+                        }
+                    }),
+                );
+                // Process-wide observers deliberately outlive every Output. The
+                // blocks own no unit or mixer pointer and consult the registry.
+                let _ = Retained::into_raw(interruption);
+                let _ = Retained::into_raw(route);
+            });
+        }
+    }
+
+    // Every registration, stop/start and disposal holds this lock. Raw handles
+    // never escape it except to their owning Output. The render thread never
+    // accesses this registry or acquires a lock.
+    struct Control {
+        intent: PlaybackIntent,
+        units: Vec<usize>,
+    }
+    static CONTROL: Mutex<Control> = Mutex::new(Control {
+        intent: PlaybackIntent {
+            active: true,
+            interrupted: false,
+        },
+        units: Vec::new(),
+    });
+
+    fn activate_session() -> Result<(), String> {
+        // SAFETY: the shared session and static playback category are valid;
+        // this is called only by serialized control work, never by rendering.
+        unsafe {
+            let session = AVAudioSession::sharedInstance();
+            session
+                .setCategory_error(AVAudioSessionCategoryPlayback)
+                .map_err(|e| e.to_string())?;
+            session
+                .setPreferredSampleRate_error(48_000.0)
+                .map_err(|e| e.to_string())?;
+            session.setActive_error(true).map_err(|e| e.to_string())
+        }
+    }
+
+    fn update(change: impl FnOnce(&mut Control)) -> Result<(), String> {
+        let mut control = CONTROL.lock().map_err(|_| "Audio control lock poisoned")?;
+        change(&mut control);
+        let mut error = None;
+        // Stop every unit first, also for route changes. Continue stopping the
+        // remaining units after an error rather than leave them running.
+        for &unit in &control.units {
+            if let Err(e) = checked("stop", unsafe {
+                AudioOutputUnitStop(unit as AudioComponentInstance)
+            }) {
+                error.get_or_insert(e);
+            }
+        }
+        if let Some(e) = error {
+            return Err(e);
+        }
+        if control.intent.should_play() {
+            // No device yet: remember intent without taking another app's audio.
+            if control.units.is_empty() {
+                return Ok(());
+            }
+            activate_session()?;
+            for &unit in &control.units {
+                checked("restart", unsafe {
+                    AudioOutputUnitStart(unit as AudioComponentInstance)
+                })?;
+            }
+        } else if !control.intent.interrupted {
+            unsafe { AVAudioSession::sharedInstance().setActive_error(false) }
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    pub fn set_active(active: bool) -> Result<(), String> {
+        notifications::install();
+        update(|c| c.intent.active = active)
+    }
+    pub fn set_interrupted(interrupted: bool) -> Result<(), String> {
+        update(|c| c.intent.interrupted = interrupted)
+    }
+    pub fn route_changed() -> Result<(), String> {
+        update(|_| {})
+    }
 
     struct Callback {
         fill: Fill,
@@ -105,18 +276,7 @@ mod device {
     impl Output {
         /// Configure playback without microphone permission, then start RemoteIO.
         pub fn start(fill: Fill) -> Result<Self, String> {
-            // SAFETY: playback uses the process's own AVAudioSession. Each checked
-            // API receives a valid string/scalar and returns a retained NSError.
-            unsafe {
-                let session = AVAudioSession::sharedInstance();
-                session
-                    .setCategory_error(AVAudioSessionCategoryPlayback)
-                    .map_err(|e| e.to_string())?;
-                session
-                    .setPreferredSampleRate_error(48_000.0)
-                    .map_err(|e| e.to_string())?;
-                session.setActive_error(true).map_err(|e| e.to_string())?;
-            }
+            notifications::install();
             let description = AudioComponentDescription {
                 componentType: u32::from_be_bytes(*b"auou"),
                 componentSubType: u32::from_be_bytes(*b"rioc"),
@@ -180,8 +340,20 @@ mod device {
                     ),
                 )?;
                 checked("initialize", AudioUnitInitialize(unit))?;
-                checked("start", AudioOutputUnitStart(unit))?;
             }
+            // Publish only fully initialized units, while serializing against
+            // focus/interruption changes. Drop the guard before propagating an
+            // error because Output::drop acquires the same control lock.
+            let started = (|| {
+                let mut control = CONTROL.lock().map_err(|_| "Audio control lock poisoned")?;
+                if control.intent.should_play() {
+                    activate_session()?;
+                    checked("start", unsafe { AudioOutputUnitStart(unit) })?;
+                }
+                control.units.push(unit as usize);
+                Ok::<_, String>(())
+            })();
+            started?;
             Ok(output)
         }
 
@@ -193,6 +365,8 @@ mod device {
 
     impl Drop for Output {
         fn drop(&mut self) {
+            let mut control = CONTROL.lock().unwrap_or_else(|e| e.into_inner());
+            control.units.retain(|&unit| unit != self.unit as usize);
             // SAFETY: this is the uniquely owned unit. Disposal ends all callbacks
             // before the Box is released. If disposal fails, leak instead of UAF.
             unsafe {
@@ -211,6 +385,15 @@ mod device {
     use super::Fill;
     /// Portable tests have no iOS audio device.
     pub struct Output;
+    pub fn set_active(_: bool) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn set_interrupted(_: bool) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn route_changed() -> Result<(), String> {
+        Ok(())
+    }
     impl Output {
         pub fn start(_: Fill) -> Result<Self, String> {
             Err("RemoteIO requires iOS".into())
@@ -220,11 +403,37 @@ mod device {
         }
     }
 }
-pub use device::Output;
+pub use device::{Output, route_changed, set_active, set_interrupted};
 
 #[cfg(test)]
 mod tests {
-    use super::sample_count;
+    use super::{PlaybackIntent, sample_count};
+    #[test]
+    fn focus_cannot_override_interruption() {
+        let mut intent = PlaybackIntent {
+            active: true,
+            interrupted: false,
+        };
+        assert!(intent.should_play());
+        intent.interrupted = true;
+        assert!(!intent.should_play());
+        intent.active = false;
+        intent.active = true;
+        assert!(!intent.should_play());
+        intent.interrupted = false;
+        assert!(intent.should_play());
+    }
+    #[test]
+    fn ending_interruption_cannot_resume_in_background() {
+        let mut intent = PlaybackIntent {
+            active: false,
+            interrupted: true,
+        };
+        intent.interrupted = false;
+        assert!(!intent.should_play());
+        intent.active = true;
+        assert!(intent.should_play());
+    }
     #[test]
     fn stereo_frame_bounds() {
         assert_eq!(sample_count(128, 1, 2, 1024), Some(256));
