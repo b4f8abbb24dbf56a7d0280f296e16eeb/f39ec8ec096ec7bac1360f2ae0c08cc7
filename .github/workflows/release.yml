@@ -1,8 +1,7 @@
-name: Build JavaScript library
+name: Build and deploy nx2ipa
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -11,8 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -20,8 +17,6 @@ jobs:
           bun-version: '1.4.4'
       - run: rustup toolchain install 1.99.0 --profile minimal --target wasm32-unknown-unknown
       - run: bun install --frozen-lockfile --ignore-scripts
-      - id: version
-        run: echo "tag=v$(bun -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
       - run: bun scripts/source.mjs
       - name: Build the thin WASM bridge from unmodified nxkit
         run: cargo build --manifest-path bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown
@@ -39,45 +34,26 @@ jobs:
           name: nx2ipa
           path: dist/
           if-no-files-found: error
-  release:
-    if: github.event_name == 'push'
+  pages:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
-    concurrency: release-${{ needs.build.outputs.tag }}
     permissions:
-      contents: write
-    env:
-      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || needs.build.outputs.tag }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+      pages: write
+      id-token: write
+    concurrency: pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Check whether this version is already published
-        id: publish
-        run: |
-          node --input-type=module <<'JS'
-          import { appendFileSync } from 'node:fs';
-          const { GITHUB_REPOSITORY: repo, RELEASE_TAG: tag, GH_TOKEN: token } = process.env;
-          async function exists(path) {
-            const response = await fetch(`https://api.github.com/repos/${repo}/${path}`, {
-              headers: { Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
-            });
-            if (response.status === 404) return false;
-            if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-            return true;
-          }
-          const published = await exists(`releases/tags/${encodeURIComponent(tag)}`);
-          const reserved = process.env.GITHUB_REF === 'refs/heads/main' &&
-            await exists(`git/ref/tags/${encodeURIComponent(tag)}`);
-          appendFileSync(process.env.GITHUB_OUTPUT, `create=${!published && !reserved}\n`);
-          JS
+      - uses: actions/configure-pages@v5
       - uses: actions/download-artifact@v4
-        if: steps.publish.outputs.create == 'true'
         with:
           name: nx2ipa
           path: dist
-      - name: Publish version once
-        if: steps.publish.outputs.create == 'true'
-        run: |
-          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" \
-            --notes 'Self-contained JavaScript library and offline HTML, tested with Bun and Chromium. Source and third-party notices are included. Requires a supplied iOS host template; device compatibility and gameplay are not validated.' \
-            dist/nx2ipa.js dist/nx2ipa.html dist/nx2ipa.zip dist/source.tar.gz dist/THIRD_PARTY_NOTICES.md
+      - run: mv dist/nx2ipa.html dist/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
