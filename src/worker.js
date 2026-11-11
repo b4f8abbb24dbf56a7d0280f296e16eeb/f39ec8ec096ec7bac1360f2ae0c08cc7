@@ -102,7 +102,36 @@ function ios(bytes) {
   }
   return false;
 }
-function signedMachO(bytes) {
+function appEntitlements(xml, identifier) {
+  // zsign serializes the profile's entitlements. Only rewrite root App ID and
+  // keychain strings, leaving unrelated capabilities and nested values alone.
+  const strings = (visit) => {
+    let depth = 0, key;
+    return xml.replace(/<\/?(?:dict|array)>|<key>([^<]+)<\/key>|<string>([^<]*)<\/string>/g, (token, name, value) => {
+      if (name !== undefined) { if (depth === 1) key = name; }
+      else if (value !== undefined) {
+        if ((depth === 1 && key === "application-identifier") || (depth === 2 && key === "keychain-access-groups"))
+          return `<string>${visit(key, value)}</string>`;
+      } else if (token[1] === "/") depth--;
+      else depth++;
+      return token;
+    });
+  };
+  let applicationId;
+  strings((key, value) => { if (key === "application-identifier") applicationId = value; return value; });
+  const prefix = applicationId?.match(/^([^.]+)\./)?.[1];
+  const expected = `${prefix}.${identifier}`;
+  const matches = (value) => value === expected || (value.endsWith("*") && expected.startsWith(value.slice(0, -1)));
+  if (!identifier || !prefix || !matches(applicationId))
+    throw new Error(`Signing requires a provisioning App ID matching ${identifier || "the app bundle ID"}`);
+  return strings((key, value) => {
+    if (key === "application-identifier") return expected;
+    if (!value.includes("*")) return value;
+    if (!matches(value)) throw new Error("Provisioning keychain wildcard does not match the app's App ID");
+    return expected;
+  });
+}
+function signedMachO(bytes, expand) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let at = 32;
   for (let i = 0; i < view.getUint32(16, true); i++) {
@@ -115,7 +144,7 @@ function signedMachO(bytes) {
         length = view.getUint32(at + 12, true);
       if (start + length > bytes.length || length < 12 || view.getUint32(start) !== 0xfade0cc0)
         return false;
-      let cms = false, identifier, applicationId;
+      let cms = false, identifier, entitlements;
       for (let row = 0; row < view.getUint32(start + 8); row++) {
         const index = start + 12 + row * 8;
         if (index + 8 > start + length) return false;
@@ -129,19 +158,15 @@ function signedMachO(bytes) {
           if (offset < blob + 44 || end < offset || end >= blob + size) return false;
           identifier = text.decode(bytes.subarray(offset, end));
         }
-        if (slot === 5 && magic === 0xfade7171) {
-          // Read the root entitlement, not a same-named key in a nested value.
-          let depth = 0;
-          const xml = text.decode(bytes.subarray(blob + 8, blob + size));
-          for (const token of xml.matchAll(/<\/?(?:dict|array)>|<key>application-identifier<\/key>\s*<string>[^.<]+\.([^<]+)<\/string>/g)) {
-            if (token[0][1] === "/") depth--;
-            else if (token[1] !== undefined) { if (depth === 1) applicationId = token[1]; }
-            else depth++;
-          }
+        if (slot === 5 && magic === 0xfade7171) entitlements = text.decode(bytes.subarray(blob + 8, blob + size));
+      }
+      if (cms && view.getUint32(12, true) === 2) {
+        const prepared = appEntitlements(entitlements ?? "", identifier);
+        if (prepared !== entitlements) {
+          if (!expand) throw new Error("Signer did not apply the app's expanded entitlements");
+          expand(prepared);
         }
       }
-      if (cms && view.getUint32(12, true) === 2 && (!identifier || applicationId !== identifier))
-        throw new Error(`Signing requires an explicit provisioning App ID matching ${identifier || "the app bundle ID"}; wildcard profiles are not supported`);
       return cms;
     }
     at += size;
@@ -179,13 +204,13 @@ async function sign(files, directories, appName, credentials) {
       ...Array(9).fill("string"),
       ...Array(5).fill("number"),
     ]);
-    const result = call(
+    const signBundle = (entitlements = "") => call(
       root,
       "",
       "/credentials/identity.p12",
       "/credentials/profile.mobileprovision",
       credentials.password,
-      "",
+      entitlements,
       "",
       "",
       "",
@@ -195,7 +220,21 @@ async function sign(files, directories, appName, credentials) {
       0,
       0,
     );
-    if (result !== 0) throw new Error("Signing failed");
+    if (signBundle() !== 0) throw new Error("Signing failed");
+    let expanded;
+    for (const [name, file] of files) {
+      if (!ios(file.data) || new DataView(file.data.buffer, file.data.byteOffset).getUint32(12, true) !== 2) continue;
+      signedMachO(fs.readFile(root + "/" + name), (xml) => {
+        if (expanded && expanded !== xml) throw new Error("Nested apps need separate provisioning entitlements");
+        expanded = xml;
+      });
+    }
+    if (expanded) {
+      // Re-sign, rather than patching signed bytes: XML/DER entitlements and
+      // their CodeDirectory hashes must all be regenerated together.
+      write("/credentials/entitlements.plist", utf8.encode(expanded));
+      if (signBundle("/credentials/entitlements.plist") !== 0) throw new Error("Signing failed");
+    }
     const output = new Map();
     const walk = (directory, prefix = "") => {
       for (const name of fs.readdir(directory).filter((name) => name !== "." && name !== "..")) {

@@ -12,11 +12,63 @@ pub type Fill = Box<dyn FnMut(&mut [f32]) + Send>;
 struct PlaybackIntent {
     active: bool,
     interrupted: bool,
+    resume_allowed: bool,
 }
 #[cfg(any(target_os = "ios", test))]
 impl PlaybackIntent {
     const fn should_play(self) -> bool {
-        self.active && !self.interrupted
+        self.active && !self.interrupted && self.resume_allowed
+    }
+
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+        // A new foreground/play request can resume after an interruption ended,
+        // but it must not clear an interruption that is still in progress.
+        if active {
+            self.resume_allowed = true;
+        }
+    }
+
+    fn session_event(&mut self, event: SessionEvent) {
+        match event {
+            SessionEvent::InterruptionBegan => self.interrupted = true,
+            SessionEvent::InterruptionEnded { should_resume } => {
+                self.interrupted = false;
+                // Ending an interruption always clears the system gate. Lack
+                // of ShouldResume instead waits for fresh playback intent.
+                self.resume_allowed &= should_resume;
+            }
+            SessionEvent::RouteChanged => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(any(target_os = "ios", test))]
+enum SessionEvent {
+    InterruptionBegan,
+    InterruptionEnded { should_resume: bool },
+    RouteChanged,
+}
+#[cfg(any(target_os = "ios", test))]
+impl SessionEvent {
+    fn interruption(kind: Option<usize>, options: Option<usize>) -> Option<Self> {
+        // AVAudioSessionInterruptionType: Ended = 0, Began = 1.
+        // AVAudioSessionInterruptionOptions: ShouldResume = 1 << 0.
+        match kind {
+            Some(1) => Some(Self::InterruptionBegan),
+            Some(0) => Some(Self::InterruptionEnded {
+                should_resume: options.is_some_and(|options| options & 1 != 0),
+            }),
+            _ => None,
+        }
+    }
+
+    fn route_change(reason: Option<usize>) -> Option<Self> {
+        // Ignore our own category changes (3) and unknown (0).
+        reason
+            .filter(|&reason| reason != 0 && reason != 3)
+            .map(|_| Self::RouteChanged)
     }
 }
 
@@ -31,7 +83,7 @@ fn sample_count(frames: u32, buffers: u32, channels: u32, bytes: u32) -> Option<
 
 #[cfg(target_os = "ios")]
 mod device {
-    use super::{Fill, PlaybackIntent, sample_count};
+    use super::{Fill, PlaybackIntent, SessionEvent, sample_count};
     use objc2_audio_toolbox::{
         AudioComponentDescription, AudioComponentFindNext, AudioComponentInstance,
         AudioComponentInstanceDispose, AudioComponentInstanceNew, AudioOutputUnitStart,
@@ -48,6 +100,7 @@ mod device {
     // floor rather than link replacement notifications from a newer SDK.
     #[allow(deprecated)]
     mod notifications {
+        use super::SessionEvent;
         use block2::RcBlock;
         use objc2::{msg_send, rc::Retained};
         use objc2_avf_audio::{
@@ -65,15 +118,11 @@ mod device {
             Some(unsafe { msg_send![&*value, unsignedIntegerValue] })
         }
 
-        fn enqueue(interrupted: Option<bool>) {
+        fn enqueue(event: SessionEvent) {
             // Always enqueue, including when the notification arrived on main.
             // Never reenter the control lock during setCategory/setActive.
             NSOperationQueue::mainQueue().addOperationWithBlock(&RcBlock::new(move || {
-                let result = match interrupted {
-                    Some(value) => super::set_interrupted(value),
-                    None => super::route_changed(),
-                };
-                if let Err(error) = result {
+                if let Err(error) = super::session_event(event) {
                     eprintln!("nx2ipa audio: {error}");
                 }
             }));
@@ -90,15 +139,11 @@ mod device {
                     None,
                     &RcBlock::new(|notification: NonNull<NSNotification>| {
                         let notification = notification.as_ref();
-                        match number(notification, AVAudioSessionInterruptionTypeKey) {
-                            Some(1) => enqueue(Some(true)),
-                            Some(0)
-                                if number(notification, AVAudioSessionInterruptionOptionKey)
-                                    .is_some_and(|options| options & 1 != 0) =>
-                            {
-                                enqueue(Some(false))
-                            }
-                            _ => {}
+                        if let Some(event) = SessionEvent::interruption(
+                            number(notification, AVAudioSessionInterruptionTypeKey),
+                            number(notification, AVAudioSessionInterruptionOptionKey),
+                        ) {
+                            enqueue(event);
                         }
                     }),
                 );
@@ -107,12 +152,12 @@ mod device {
                     Some(&session),
                     None,
                     &RcBlock::new(|notification: NonNull<NSNotification>| {
-                        // Ignore our own category changes (3) and unknown (0).
                         // Only actual route/configuration changes need a restart.
-                        if number(notification.as_ref(), AVAudioSessionRouteChangeReasonKey)
-                            .is_some_and(|reason| reason != 0 && reason != 3)
-                        {
-                            enqueue(None);
+                        if let Some(event) = SessionEvent::route_change(number(
+                            notification.as_ref(),
+                            AVAudioSessionRouteChangeReasonKey,
+                        )) {
+                            enqueue(event);
                         }
                     }),
                 );
@@ -135,6 +180,7 @@ mod device {
         intent: PlaybackIntent {
             active: true,
             interrupted: false,
+            resume_allowed: true,
         },
         units: Vec::new(),
     });
@@ -189,13 +235,13 @@ mod device {
     }
     pub fn set_active(active: bool) -> Result<(), String> {
         notifications::install();
-        update(|c| c.intent.active = active)
+        update(|c| c.intent.set_active(active))
     }
-    pub fn set_interrupted(interrupted: bool) -> Result<(), String> {
-        update(|c| c.intent.interrupted = interrupted)
+    fn session_event(event: SessionEvent) -> Result<(), String> {
+        update(|c| c.intent.session_event(event))
     }
     pub fn route_changed() -> Result<(), String> {
-        update(|_| {})
+        session_event(SessionEvent::RouteChanged)
     }
 
     struct Callback {
@@ -388,9 +434,6 @@ mod device {
     pub fn set_active(_: bool) -> Result<(), String> {
         Ok(())
     }
-    pub fn set_interrupted(_: bool) -> Result<(), String> {
-        Ok(())
-    }
     pub fn route_changed() -> Result<(), String> {
         Ok(())
     }
@@ -403,37 +446,126 @@ mod device {
         }
     }
 }
-pub use device::{Output, route_changed, set_active, set_interrupted};
+pub use device::{Output, route_changed, set_active};
 
 #[cfg(test)]
 mod tests {
-    use super::{PlaybackIntent, sample_count};
-    #[test]
-    fn focus_cannot_override_interruption() {
-        let mut intent = PlaybackIntent {
+    use super::{PlaybackIntent, SessionEvent, sample_count};
+
+    fn active_intent() -> PlaybackIntent {
+        PlaybackIntent {
             active: true,
             interrupted: false,
-        };
+            resume_allowed: true,
+        }
+    }
+
+    #[test]
+    fn focus_and_route_cannot_override_interruption() {
+        let mut intent = active_intent();
         assert!(intent.should_play());
-        intent.interrupted = true;
+        intent.session_event(SessionEvent::InterruptionBegan);
         assert!(!intent.should_play());
-        intent.active = false;
-        intent.active = true;
+        intent.set_active(false);
+        intent.set_active(true);
+        intent.session_event(SessionEvent::RouteChanged);
+        assert!(intent.interrupted);
         assert!(!intent.should_play());
-        intent.interrupted = false;
+        intent.session_event(SessionEvent::InterruptionEnded {
+            should_resume: true,
+        });
+        assert!(!intent.interrupted);
         assert!(intent.should_play());
     }
+
     #[test]
     fn ending_interruption_cannot_resume_in_background() {
-        let mut intent = PlaybackIntent {
-            active: false,
-            interrupted: true,
-        };
-        intent.interrupted = false;
+        let mut intent = active_intent();
+        intent.session_event(SessionEvent::InterruptionBegan);
+        intent.set_active(false);
+        intent.session_event(SessionEvent::InterruptionEnded {
+            should_resume: true,
+        });
+        assert!(!intent.interrupted);
         assert!(!intent.should_play());
-        intent.active = true;
+        intent.set_active(true);
         assert!(intent.should_play());
     }
+
+    #[test]
+    fn denied_resume_clears_interruption_but_waits_for_fresh_intent() {
+        for active in [false, true] {
+            let mut intent = active_intent();
+            intent.session_event(SessionEvent::InterruptionBegan);
+            intent.set_active(active);
+            intent.session_event(SessionEvent::InterruptionEnded {
+                should_resume: false,
+            });
+            assert!(!intent.interrupted);
+            assert_eq!(intent.active, active);
+            assert!(!intent.should_play());
+            intent.session_event(SessionEvent::RouteChanged);
+            assert!(!intent.should_play());
+            intent.set_active(true);
+            assert!(intent.should_play());
+        }
+    }
+
+    #[test]
+    fn later_interruption_cannot_replace_fresh_playback_intent() {
+        let mut intent = active_intent();
+        intent.session_event(SessionEvent::InterruptionBegan);
+        intent.session_event(SessionEvent::InterruptionEnded {
+            should_resume: false,
+        });
+        intent.session_event(SessionEvent::InterruptionBegan);
+        intent.session_event(SessionEvent::InterruptionEnded {
+            should_resume: true,
+        });
+        assert!(!intent.interrupted);
+        assert!(!intent.should_play());
+        intent.set_active(true);
+        assert!(intent.should_play());
+    }
+
+    #[test]
+    fn interruption_notifications_always_deliver_an_end() {
+        for (options, should_resume) in [
+            (None, false),
+            (Some(0), false),
+            (Some(2), false),
+            (Some(1), true),
+            (Some(3), true),
+        ] {
+            let begin = SessionEvent::interruption(Some(1), options).unwrap();
+            assert_eq!(begin, SessionEvent::InterruptionBegan);
+            let end = SessionEvent::interruption(Some(0), options).unwrap();
+            assert_eq!(end, SessionEvent::InterruptionEnded { should_resume });
+            let mut intent = active_intent();
+            intent.session_event(begin);
+            assert!(!intent.should_play());
+            intent.session_event(end);
+            assert!(!intent.interrupted);
+            assert_eq!(intent.should_play(), should_resume);
+        }
+        for kind in [None, Some(2), Some(usize::MAX)] {
+            assert_eq!(SessionEvent::interruption(kind, Some(1)), None);
+        }
+    }
+
+    #[test]
+    fn route_notifications_ignore_category_and_unknown_changes() {
+        for reason in [None, Some(0), Some(3)] {
+            assert_eq!(SessionEvent::route_change(reason), None);
+        }
+        for reason in [1, 2, 4, 6, 7, 8] {
+            assert_eq!(
+                SessionEvent::route_change(Some(reason)),
+                Some(SessionEvent::RouteChanged)
+            );
+        }
+    }
+
     #[test]
     fn stereo_frame_bounds() {
         assert_eq!(sample_count(128, 1, 2, 1024), Some(256));

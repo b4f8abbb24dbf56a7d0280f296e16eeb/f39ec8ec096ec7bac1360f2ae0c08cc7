@@ -236,7 +236,7 @@ export async function signingFixture(bundleId = "org.example.sample") {
     const cert = (await readFile(join(directory, "leaf.der"))).toString("base64");
     await writeFile(
       join(directory, "profile.plist"),
-      `<plist version="1.0"><dict><key>TeamIdentifier</key><array><string>TEST123456</string></array><key>ApplicationIdentifierPrefix</key><array><string>TEST123456</string></array><key>DeveloperCertificates</key><array><data>${cert}</data></array><key>ExpirationDate</key><date>${new Date(Date.now() + 86400000).toISOString()}</date><key>Entitlements</key><dict><key>application-identifier</key><string>TEST123456.${bundleId}</string><key>com.apple.developer.team-identifier</key><string>TEST123456</string><key>get-task-allow</key><true/></dict></dict></plist>`,
+      `<plist version="1.0"><dict><key>TeamIdentifier</key><array><string>TEST123456</string></array><key>ApplicationIdentifierPrefix</key><array><string>TEST123456</string></array><key>DeveloperCertificates</key><array><data>${cert}</data></array><key>ExpirationDate</key><date>${new Date(Date.now() + 86400000).toISOString()}</date><key>Entitlements</key><dict><key>application-identifier</key><string>TEST123456.${bundleId}</string><key>com.apple.developer.team-identifier</key><string>TEST123456</string><key>get-task-allow</key><true/><key>keychain-access-groups</key><array><string>TEST123456.*</string><string>TEST123456.shared</string></array></dict></dict></plist>`,
     );
     command([
       "cms",
@@ -289,6 +289,15 @@ export async function signingFixture(bundleId = "org.example.sample") {
           "-out",
           "verified.bin",
         ]);
+        // Verify that both entitlement blobs are covered by the signed CodeDirectory.
+        const { createHash } = await import("node:crypto");
+        const cd = new DataView(blobs.get(0).buffer), hashOffset = cd.getUint32(16);
+        for (const slot of [5, 7]) if (blobs.has(slot)) {
+          const expected = blobs.get(0).subarray(hashOffset - slot * 32, hashOffset - (slot - 1) * 32);
+          if (!createHash("sha256").update(blobs.get(slot)).digest().equals(expected))
+            throw new Error("Entitlements are not covered by the CodeDirectory");
+        }
+        return { xml: new TextDecoder().decode(blobs.get(5)?.subarray(8)), der: blobs.get(7)?.subarray(8) };
       },
       dispose: () => rm(directory, { recursive: true, force: true }),
     };
@@ -386,10 +395,23 @@ export async function exercise(run) {
   } finally {
     await signing.dispose();
   }
-  for (const bundleId of ["org.example.different", "org.example.*"]) {
+  const wildcard = await signingFixture("org.example.*");
+  try {
+    const result = await run({ ...request, signing: wildcard }), signed = unzipSync(result.ipa);
+    assert.equal(result.signed, true);
+    assert.deepEqual(signed[root + "embedded.mobileprovision"], wildcard.profile);
+    const entitlements = await wildcard.verify(signed[root + "Sample"]);
+    await wildcard.verify(signed[root + "Frameworks/nxgame.dylib"]);
+    assert.match(entitlements.xml, /<key>application-identifier<\/key>\s*<string>TEST123456\.org\.example\.sample<\/string>/);
+    assert.match(entitlements.xml, /<string>TEST123456\.shared<\/string>/);
+    assert.ok(!entitlements.xml.includes("*"));
+    assert.ok(Buffer.from(entitlements.der).includes(Buffer.from("TEST123456.org.example.sample")));
+    assert.ok(!Buffer.from(entitlements.der).includes(Buffer.from("TEST123456.*")));
+  } finally { await wildcard.dispose(); }
+  for (const bundleId of ["org.example.different", "org.other.*"]) {
     const mismatch = await signingFixture(bundleId);
     try {
-      await assert.rejects(run({ ...request, signing: mismatch }), /explicit provisioning App ID matching org\.example\.sample/);
+      await assert.rejects(run({ ...request, signing: mismatch }), /provisioning App ID matching org\.example\.sample/);
     } finally { await mismatch.dispose(); }
   }
   await assert.rejects(run(request, { abortAt: "build" }), { name: "AbortError" });

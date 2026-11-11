@@ -38,13 +38,10 @@ pub fn init(cfg: &Config) {
 }
 
 /// Set foreground playback intent, including before the mixer opens its output.
+/// A new active request permits playback after an interruption has ended, but
+/// cannot override an interruption that is still in progress.
 pub fn set_active(active: bool) -> Result<(), String> {
     sys::au::set_active(active)
-}
-/// Forward interruption begin/end independently of UIKit focus. Clear only when
-/// the interruption-end notification permits resumption.
-pub fn set_interrupted(interrupted: bool) -> Result<(), String> {
-    sys::au::set_interrupted(interrupted)
 }
 /// Restart after a route change, preserving focus and interruption state.
 pub fn route_changed() -> Result<(), String> {
