@@ -1,24 +1,29 @@
-# Rust UIKit shell
+# Swift app shell
 
-The session factory receives the retained CAMetalLayer, sandbox paths, and the
-connected scene screen's maximum frames per second. That maximum is a ceiling,
-not proof of adaptive refresh or a measured delivery rate.
+`App.swift` owns UIApplication, the single UIWindowScene, startup errors and
+foreground/background/disconnect handling. `MetalView.swift` owns the real
+CAMetalLayer drawable size and UIKit touch routing. `TouchState.swift` has no
+UIKit dependency and is tested on the CI Mac before the app links.
 
-The session's `touches` callback receives the complete active set with stable
-IDs 0–15 and normalized top-left picture coordinates. UIKit began/moved/ended/
-cancelled callbacks run on the main thread. Contacts are released on scene
-resignation/disconnection, process termination and view geometry changes. Extra
-contacts beyond 16 are ignored until their next independent touch begins.
+The Rust static library exposes only the C functions in
+`ios/app/include/nx2ipa.h`. Calls stay on the main thread; strings, buffers and
+touch arrays are borrowed only during each call. Rust retains the Metal layer
+and owns the runtime session. No Rust object or allocator ownership crosses C.
+The shell never loads a guest dylib or implements kernel/GPU services itself.
 
-The pinned GPU presenter (`nxkit-gpu/src/blit.rs`) fills its drawable with a
-full-screen triangle; it does not publish an aspect-fit rectangle. The default
-mapping therefore uses the actual full Metal view, matching that output.
-`Session::picture_aspect` may return an aspect only if the backend really draws
-centered aspect-fit content. Then new contacts in bars are rejected and ongoing
-drags clamp to picture edges. This API does not itself change GPU rendering or
-silently assume every game is 16:9.
+Only one game may initialize per process. Disconnect pauses input/audio/rendering
+and requests process shutdown; it is not a library navigation/reset flow. The
+session and guest mappings are kept alive until process exit because the shared
+kernel has process-lifetime state and detached guest threads.
 
-Six portable shell tests pass, including four touch identity/geometry tests.
-The shell and link-probe target type-check for aarch64-apple-ios. UIKit event
-routing, multi-finger gestures and lifecycle behavior still need device testing;
-portable tests and Rust checks are not evidence of delivered physical input.
+Touches have stable IDs in 0..<16 and normalized picture coordinates. The current
+presenter fills the drawable, so touches map to the actual full view without an
+assumed 16:9 rectangle. Aspect-fit mapping is available only if the native
+presenter reports that it actually uses it. New touches in bars are rejected;
+existing drags clamp to the edge. Rotation, inactivity and cancellation release
+contacts. These portable tests do not establish physical device input delivery.
+
+The useful architectural reference was [NX2Apple's Swift shell and engine
+boundary](https://github.com/LNPANDY/NX2Apple/tree/main/frontend-ios). This shell
+is implemented for nxkit's existing runtime; no NX2Apple code, nxnative loader,
+per-game framework isolation or teardown implementation is copied.

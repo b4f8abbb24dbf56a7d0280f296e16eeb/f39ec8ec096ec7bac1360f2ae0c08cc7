@@ -4,9 +4,15 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
-[[bin]]
-name = "nx2ipa"
-path = "src/main.rs"
-[target.'cfg(target_os = "ios")'.dependencies]
+
+[lib]
+name = "nx2ipa_runtime"
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
 nxkit-host.workspace = true
-nx2ipa-ios-shell = { path = "../shell" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-quartz-core = { workspace = true, features = ["std", "CAMetalLayer"] }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["input", "audio", "shell", "video", "system", "metal", "coreml", "gpu", "runtime", "host", "app"]
+members = ["input", "audio", "video", "system", "metal", "coreml", "gpu", "runtime", "host", "app"]
 
 [workspace.dependencies]
 nxkit-abi = { path = "../.build/nxkit/crates/nxkit-abi" }
@@ -9,7 +9,6 @@ objc2-core-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5ab
 objc2-foundation = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-game-controller = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-core-haptics = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
-objc2-ui-kit = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 objc2-quartz-core = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }
 
 objc2-audio-toolbox = { git = "https://github.com/madsmtm/objc2", rev = "8a5abacd90d5403fc0463459a35826f892b9142e", default-features = false }

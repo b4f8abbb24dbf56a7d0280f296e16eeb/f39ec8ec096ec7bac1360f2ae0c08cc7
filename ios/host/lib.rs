@@ -1,4 +1,5 @@
 //! Fresh iOS host composition. Shared modules are verified, unchanged nxkit sources.
+pub mod api;
 pub mod bundle;
 pub mod error;
 pub mod gates;

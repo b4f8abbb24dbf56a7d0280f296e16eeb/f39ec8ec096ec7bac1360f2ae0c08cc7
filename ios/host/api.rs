@@ -1,3 +1,4 @@
+//! Native engine contract. UIKit and touch tracking live in the Swift shell.
 use std::path::{Path, PathBuf};
 
 /// Read-only application assets and separate writable sandbox roots.
@@ -73,4 +74,26 @@ mod tests {
             assert!(Paths::new(Path::new(a), Path::new(b)).is_err());
         }
     }
+}
+
+/// ABI-stable normalized finger, owned by the caller for the duration of a call.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Touch {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Main-thread-only session. Stop requests process shutdown, not a runtime reset.
+#[cfg(target_os = "ios")]
+pub trait Session {
+    fn set_active(&mut self, active: bool);
+    fn resize(&mut self, width: u32, height: u32);
+    fn touches(&mut self, points: &[Touch]);
+    /// None means full drawable. Only return an aspect if rendering aspect-fits.
+    fn picture_aspect(&self) -> Option<f64> {
+        None
+    }
+    fn stop(&mut self);
 }

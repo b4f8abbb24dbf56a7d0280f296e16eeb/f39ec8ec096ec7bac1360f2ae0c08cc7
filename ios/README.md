@@ -1,4 +1,4 @@
-# Fresh Rust iOS runtime
+# Swift iOS shell and Rust runtime
 
 This is downstream nx2ipa code, not the legacy host or its patch stack. The
 pinned `.build/nxkit` checkout is never rewritten. Reused modules are unchanged;
@@ -7,8 +7,9 @@ not claims that upstream itself supports iOS.
 
 Implemented:
 
-- Rust UIKit app entry, scene lifecycle, CAMetalLayer sizing, error display,
-  16-point multitouch, GameController/Core Haptics and display-rate policy.
+- Swift UIKit app entry, scene lifecycle, CAMetalLayer sizing, error display
+  and 16-point multitouch. A small C ABI connects the shell to the existing Rust
+  runtime, including GameController/Core Haptics and display-rate policy.
 - Signed guest-dylib loading through dyld only. The host checks ARM64/iOS 26,
   rejects automatic initializers and dependencies except libSystem, validates module segments,
   moves addresses by dyld's slide, and reserves non-executable guest memory.
@@ -32,22 +33,24 @@ Implemented:
 `source.json` receipts list unchanged source hashes and explicit adapter hashes.
 The auxiliary nxb-xlate tree supplies unchanged GPU test fixtures. No source text
 substitutions are performed, and no generated native binary is committed.
+The Swift shell sources live in `ios/shell`; `ios/app/include/nx2ipa.h` is the
+main-thread-only engine contract. The old Rust UIKit shell/main is removed.
 
 `--check` type-checks all iOS workspace targets and runs portable tests.
-On macOS with Xcode, `--link-check` builds the **real** `nx2ipa` app executable,
-including its loader/kernel/GPU, and checks ARM64, iOS 26.0 and absence of AppKit.
-It no longer tests only the earlier `link_probe` example. The command does not
-produce a production readiness receipt.
+On macOS with Xcode, `--link-check` tests the host/C ABI and pure Swift touch
+logic, then links the **real** `nx2ipa` Swift app executable against the Rust static
+library, including its loader/kernel/GPU, and checks ARM64, iOS 26.0 and absence of AppKit.
+Rust reports its native framework dependencies directly to the Swift link step.
+The command does not produce a production readiness receipt.
 
-On 2026-11-11 the whole workspace passed Rust 1.99 ARM64 iOS all-target checks.
-The Linux check used `DOCS_RS=1` solely to skip objc2's Objective-C exception
+The Linux Rust check uses `DOCS_RS=1` solely to skip objc2's Objective-C exception
 helper compilation, since it has no Xcode/Clang. That is not SDK-link evidence.
 Portable tests run with `RUSTFLAGS='--cap-lints warn'` because an unchanged nxkit
 non-ARM documentation lint otherwise prevents the Linux test build.
 
 ## Remaining verification and limitations
 
-- Full runtime SDK linking is a separate gate from the earlier green shell probe.
+- Swift/UIKit SDK linking is a separate gate from portable touch and Rust tests.
 - No physical iPhone install or guest/gameplay run has been verified. Signing,
   provisioning, address-space/memory limits and device GPU/codec support matter.
 - Automatic shader discovery/conversion must supply the resources under

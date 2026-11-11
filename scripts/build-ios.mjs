@@ -76,7 +76,7 @@ const adapters = {
   system: ["nxkit-svc-system", { "sys.rs": "ios/system/platform.rs" }],
   runtime: ["nxkit-rt", {}],
   "nxb-xlate": ["nxb-xlate", {}],
-  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs", "padding.rs": "ios/host/padding.rs" }],
+  host: ["nxkit-host", { "lib.rs": "ios/host/lib.rs", "api.rs": "ios/host/api.rs", "place.rs": "ios/host/place.rs", "refresh.rs": "ios/host/refresh.rs", "pipecache.rs": "ios/host/pipecache.rs", "sys/appkit.rs": "ios/host/window.rs", "sys/mouse.rs": "ios/host/pointer.rs", "session.rs": "ios/host/session.rs", "bundle.rs": "ios/host/bundle.rs", "image.rs": "ios/host/image.rs", "padding.rs": "ios/host/padding.rs" }],
 };
 export const prepareIosAdapter = (name) => {
   if (!Object.hasOwn(adapters, name)) throw new Error(`Unknown iOS adapter: ${name}`);
@@ -95,6 +95,41 @@ export function verifyIosProbe(arch, build, libraries) {
   if (failures.length) throw new Error(`The native probe is not an arm64 iOS 26.0 link: ${failures.join("; ")}`);
 }
 
+// Rust static libraries do not propagate all framework dependencies to Swift.
+// Use rustc's authoritative list instead of hand-maintaining platform frameworks.
+export function nativeLinkFlags(output) {
+  const lines = [...output.matchAll(/native-static-libs:\s*([^\r\n]+)/g)];
+  if (!lines.length) throw new Error("rustc did not report native static library dependencies");
+  const flags = lines.at(-1)[1].trim().split(/\s+/);
+  for (let i = 0; i < flags.length; i++) {
+    if (flags[i] === "-framework") {
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(flags[++i] ?? "") || flags[i] === "AppKit")
+        throw new Error("Unexpected native framework dependency");
+    } else if (!/^-l[A-Za-z0-9_.+-]+$/.test(flags[i])) {
+      throw new Error("Unexpected native linker argument: " + flags[i]);
+    }
+  }
+  return flags;
+}
+async function buildRuntime() {
+  const args = ["cargo", "rustc", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-app", "--lib", "--target", "aarch64-apple-ios", "--release", "--", "--print", "native-static-libs"];
+  const child = Bun.spawn(args, { cwd: root, env: { ...process.env }, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+  ]);
+  console.log(stdout + stderr);
+  if (code) throw new Error("The Rust runtime static library failed to build");
+  return nativeLinkFlags(stdout + stderr);
+}
+async function testSwiftShell() {
+  const binary = resolve(root, ".build/ios/swift-shell-tests");
+  // No iPhone SDK/target on this command: these pure Swift tests run on CI's Mac.
+  console.log(await command(["xcrun", "--sdk", "macosx", "swiftc", "-swift-version", "6", "-sdk",
+    await command(["xcrun", "--sdk", "macosx", "--show-sdk-path"]),
+    "ios/shell/TouchState.swift", "ios/shell/tests/main.swift", "-o", binary]));
+  console.log(await command([binary]));
+}
+
 if (import.meta.main) {
   if (process.argv[2] !== "--check" && process.argv[2] !== "--prepare" && process.argv[2] !== "--link-check" && process.argv[2] !== "--test-artifact") {
     throw new Error("The native runtime has not passed installation/gameplay validation. Use --check, --link-check or --test-artifact for build verification; no production host receipt is generated.");
@@ -104,21 +139,29 @@ if (import.meta.main) {
   console.log(`Prepared iOS adapters with ${prepared.reduce((sum, item) => sum + item.reusedModules, 0)} unchanged nxkit source files`);
   if (process.argv[2] === "--link-check" || process.argv[2] === "--test-artifact") {
     if (process.platform !== "darwin") throw new Error("The iOS SDK link check requires macOS with Xcode");
-    process.env.SDKROOT = await command(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]);
+    process.env.SDKROOT = await command(["xcrun", "--sdk", "macosx", "--show-sdk-path"]);
     process.env.IPHONEOS_DEPLOYMENT_TARGET = "26.0";
     if (process.argv[2] === "--test-artifact") {
       // Vendor all lockfile dependencies, including portable validator/test targets.
       await command(["cargo", "fetch", "--locked", "--manifest-path", "ios/Cargo.toml"]);
     }
-    console.log(await command(["cargo", "build", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-app", "--bin", "nx2ipa", "--target", "aarch64-apple-ios", "--release"]));
+    console.log(await command(["cargo", "test", "--locked", "--manifest-path", "ios/Cargo.toml", "--package", "nx2ipa-ios-host", "--package", "nx2ipa-ios-app", "--lib"]));
+    await testSwiftShell();
+    process.env.SDKROOT = await command(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]);
+    const nativeLibraries = await buildRuntime();
     const binary = resolve(root, "ios/target/aarch64-apple-ios/release/nx2ipa");
+    console.log(await command(["xcrun", "--sdk", "iphoneos", "swiftc", "-swift-version", "6", "-O", "-whole-module-optimization",
+      "-target", "arm64-apple-ios26.0", "-sdk", process.env.SDKROOT, "-module-name", "Nx2ipaShell",
+      "-import-objc-header", "ios/app/include/nx2ipa.h", "ios/shell/App.swift", "ios/shell/MetalView.swift", "ios/shell/TouchState.swift",
+      "ios/target/aarch64-apple-ios/release/libnx2ipa_runtime.a", ...nativeLibraries,
+      "-framework", "UIKit", "-framework", "QuartzCore", "-o", binary]));
     const build = await command(["xcrun", "vtool", "-show-build", binary]);
     const libraries = await command(["otool", "-L", binary]);
     const arch = await command(["lipo", "-archs", binary]);
     // Print the SDK evidence before asserting so CI failures identify the exact boundary.
     console.log(`Native app architectures: ${JSON.stringify(arch)}\n${build}\n${libraries}`);
     verifyIosProbe(arch, build, libraries);
-    console.log("Linked the real Rust iOS app, guest loader/kernel and GPU/service adapters. Installation and gameplay are unverified; no runtimeReady receipt was produced.");
+    console.log("Linked the Swift iOS shell with the real Rust guest loader/kernel and GPU/service adapters. Installation and gameplay are unverified; no runtimeReady receipt was produced.");
     if (process.argv[2] === "--test-artifact") {
       console.log("Unsigned test artifact: " + await createTestArtifact(binary, { architecture: arch, build, libraries }, Object.keys(adapters), verifyIosProbe));
     }

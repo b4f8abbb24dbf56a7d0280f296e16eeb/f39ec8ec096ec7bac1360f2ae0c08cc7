@@ -3,7 +3,7 @@ use crate::{
     HostError, Result, boot::Boot, bundle, guestsym, loader, pipecache, place, refresh, seams,
     stop, sys, thread,
 };
-use nx2ipa_ios_shell::{Paths, Session, Touch};
+use crate::api::{Paths, Session, Touch};
 use nxkit_metal::{Context, DisplayLink, Presenter};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_quartz_core::CAMetalLayer;

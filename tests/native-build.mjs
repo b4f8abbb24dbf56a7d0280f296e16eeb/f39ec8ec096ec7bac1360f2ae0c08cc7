@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { command } from "../scripts/source.mjs";
-import { verifyIosProbe } from "../scripts/build-ios.mjs";
+import { verifyIosProbe, nativeLinkFlags } from "../scripts/build-ios.mjs";
 
 // Bun may inherit its initial environment unless an explicit env is supplied.
 // The SDK and deployment floor are selected after process startup in build-ios.
@@ -25,3 +25,8 @@ for (const [arch, metadata, dylibs] of [
   ["arm64", build, "/System/Library/Frameworks/AppKit.framework/AppKit"],
 ]) assert.throws(() => verifyIosProbe(arch, metadata, dylibs));
 console.log("Native build environment and strict iOS target checks passed");
+
+assert.deepEqual(nativeLinkFlags("note: native-static-libs: -framework Foundation -lSystem -lobjc\n"), ["-framework", "Foundation", "-lSystem", "-lobjc"]);
+for (const output of ["", "note: native-static-libs: -framework AppKit", "note: native-static-libs: -framework", "note: native-static-libs: -Xlinker nope"])
+  assert.throws(() => nativeLinkFlags(output));
+console.log("Rust-to-Swift native linker dependency checks passed");

@@ -40,3 +40,11 @@ bun run test
 ```
 
 CI builds the WASM on Linux, builds the actual unsigned host against the iOS SDK, and checks authored NSP packaging, synthetic host/guest signing and the native bundle reader. It then embeds that exact host using `--experimental-host`, tests the final JS in Bun and Chromium (including NSP/XCI drag-and-drop and synthetic signed output from the actual page), and publishes the successful HTML/JS to GitHub Pages. Pull requests only validate. The experimental release keeps `runtimeReady`, device and gameplay flags false; it never invents signing credentials. Both exact source archives, dependency notices and validation receipts accompany the release. Open `dist/nx2ipa.html` directly for offline use.
+
+## Native app shell
+
+The iOS app shell is Swift/UIKit. It owns the window, scene lifecycle, Metal view
+and touch input, and calls the existing Rust nxkit runtime through a small C ABI.
+CI builds the runtime static library, runs portable Rust/Swift checks, and links
+the Swift executable with the iPhoneOS SDK. See [ios/README.md](ios/README.md).
+This does not establish installation, guest boot or gameplay on a physical device.

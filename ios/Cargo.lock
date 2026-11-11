@@ -58,7 +58,8 @@ name = "nx2ipa-ios-app"
 version = "0.1.0"
 dependencies = [
  "nx2ipa-ios-host",
- "nx2ipa-ios-shell",
+ "objc2",
+ "objc2-quartz-core",
 ]
 
 [[package]]
@@ -110,7 +111,6 @@ dependencies = [
  "nx2ipa-ios-input",
  "nx2ipa-ios-metal",
  "nx2ipa-ios-rt",
- "nx2ipa-ios-shell",
  "nx2ipa-ios-system",
  "nx2ipa-ios-video",
  "nxkit-abi",
@@ -168,19 +168,6 @@ dependencies = [
  "nxkit-svc-offline",
  "nxkit-svc-pacing",
  "nxtitle",
-]
-
-[[package]]
-name = "nx2ipa-ios-shell"
-version = "0.1.0"
-dependencies = [
- "nx2ipa-ios-audio",
- "nx2ipa-ios-input",
- "objc2",
- "objc2-core-foundation",
- "objc2-foundation",
- "objc2-quartz-core",
- "objc2-ui-kit",
 ]
 
 [[package]]
@@ -484,18 +471,6 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation",
  "objc2-metal",
-]
-
-[[package]]
-name = "objc2-ui-kit"
-version = "0.3.2"
-source = "git+https://github.com/madsmtm/objc2?rev=8a5abacd90d5403fc0463459a35826f892b9142e#8a5abacd90d5403fc0463459a35826f892b9142e"
-dependencies = [
- "bitflags",
- "objc2",
- "objc2-core-foundation",
- "objc2-foundation",
- "objc2-quartz-core",
 ]
 
 [[package]]

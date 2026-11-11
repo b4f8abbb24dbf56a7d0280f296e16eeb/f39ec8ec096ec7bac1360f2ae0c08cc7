@@ -136,6 +136,7 @@ export async function nativeSourceArchive(destination, adapterNames) {
   if (!notices) throw new Error('Rust redistribution notices missing');
   const provenance = { schema: 1, commit: await command(['git', 'rev-parse', 'HEAD']),
     rust: await command(['rustc', '-Vv']), cargo: await command(['cargo', '-V']),
+    swift: await command(['xcrun', 'swiftc', '--version']),
     rustflags: process.env.RUSTFLAGS ?? '', deploymentTarget: process.env.IPHONEOS_DEPLOYMENT_TARGET ?? '', nxkit: pin, files: sourceFiles };
   await mkdir(join(src, 'provenance'));
   for (const name of adapterNames)
@@ -143,7 +144,7 @@ export async function nativeSourceArchive(destination, adapterNames) {
   await writeFile(join(src, 'NATIVE_SOURCE.json'), JSON.stringify(provenance, null, 2) + '\n');
   await writeFile(join(src, 'BUILD_NATIVE.txt'), [
     'Exact corresponding native source for the unsigned nx2ipa test host.',
-    'Requires preinstalled Bun, Rust 1.99.0 with aarch64-apple-ios and the repository wasm32 target, and macOS/Xcode with an iPhoneOS SDK. Apple SDKs are not redistributed.',
+    'Requires preinstalled Bun, Rust 1.99.0 with aarch64-apple-ios and the repository wasm32 target, and macOS/Xcode with Swift 6 and an iPhoneOS 26 SDK. Apple SDKs are not redistributed.',
     'Cargo dependency sources are in vendor/; additional pinned Git monorepo licenses are in git-source-notices/ and mapped by CARGO_LICENSES.json. Exact nxkit source and GPL/third-party notices are in .build/nxkit/. Rust redistribution notices are in toolchain-notices/.',
     'From this directory: CARGO_NET_OFFLINE=true bun scripts/build-ios.mjs --link-check',
     'Do not run source.mjs: exact source and verification objects are already included.',
@@ -171,7 +172,7 @@ export async function createTestArtifact(binary, evidence, adapterNames, verify)
     verify(arch, build, libraries);
     const source = await nativeSourceArchive(stage, adapterNames);
     const receipt = {
-      schema: 1, kind: 'unsigned-native-test-host', appName: 'Nx2ipa.app', executable: 'nx2ipa',
+      schema: 1, kind: 'unsigned-native-test-host', shell: 'swift-uikit', engineBoundary: 'c-abi', appName: 'Nx2ipa.app', executable: 'nx2ipa',
       runtimeReady: false, sdkLinked: true, unsigned: true, deviceValidated: false,
       gameplayValidated: false, bundleContractValidated: false, syntheticSigningValidated: false, containsGame: false,
       removedAdHocSignature: signing.removedAdHocSignature,
