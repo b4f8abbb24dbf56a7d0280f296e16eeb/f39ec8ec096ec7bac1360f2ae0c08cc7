@@ -1,0 +1,57 @@
+name: Build JavaScript library
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: rustup toolchain install 1.99.0 --profile minimal --target wasm32-unknown-unknown
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun scripts/source.mjs
+      - name: Build the thin WASM bridge from unmodified nxkit
+        run: cargo build --manifest-path bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown
+        env:
+          RUSTFLAGS: --cap-lints warn
+      - run: bun scripts/build.mjs
+      - name: Test the release library in Bun
+        run: bun run test
+      - run: bunx --no-install playwright install --with-deps chromium
+      - name: Test the same release library in Chromium
+        run: bun tests/browser.mjs
+      - run: bun scripts/release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nx2ipa
+          path: dist/
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nx2ipa
+          path: dist
+      - name: Publish tagged release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/nx2ipa.js
+            dist/nx2ipa.html
+            dist/nx2ipa.zip
+            dist/source.tar.gz
+            dist/THIRD_PARTY_NOTICES.md

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>nx2ipa</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        max-width: 760px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #101318;
+        color: #edf2f7;
+      }
+      h1 {
+        font-size: 32px;
+      }
+      fieldset {
+        border: 1px solid #405064;
+        margin: 20px 0;
+        padding: 18px;
+        border-radius: 12px;
+      }
+      label {
+        display: block;
+        margin: 12px 0;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+      }
+      input[type="file"] {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+      }
+      textarea {
+        display: block;
+        width: 100%;
+        min-height: 65px;
+        box-sizing: border-box;
+      }
+      button,
+      a {
+        padding: 10px 16px;
+      }
+      a {
+        color: #89c5ff;
+      }
+      small {
+        color: #a8b6c5;
+      }
+      .hidden,
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>nx2ipa</h1>
+    <p>Convert locally to an IPA. Nothing is uploaded.</p>
+    <p>
+      <small
+        >Requires your own compatible unsigned arm64 iOS host template. A signed archive does not
+        establish Apple trust, installation or gameplay.</small
+      >
+    </p>
+    <form id="form">
+      <fieldset>
+        <legend>1. Host template</legend>
+        <label
+          >Unsigned .app folder<input id="template" type="file" webkitdirectory required
+        /></label>
+        <label
+          >Executable paths inside the .app, one per line<textarea
+            id="executables"
+            required
+            placeholder="Game"
+          ></textarea>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>2. Game</legend>
+        <label
+          >Input<select id="mode">
+            <option value="extracted">Extracted NSO files</option>
+            <option value="nsp">Base NSP</option>
+            <option value="app">Package existing app only</option>
+          </select></label
+        >
+        <label class="game">Profile JSON<input id="profile" type="file" accept=".json" /></label>
+        <div id="extracted">
+          <label>NSO modules<input id="modules" type="file" multiple /></label
+          ><label>main.npdm<input id="npdm" type="file" /></label
+          ><label>Optional RomFS folder<input id="romfs" type="file" webkitdirectory /></label>
+        </div>
+        <div id="raw" hidden>
+          <label>Base NSP<input id="nsp" type="file" accept=".nsp" /></label
+          ><label>Your local prod.keys<input id="keys" type="file" /></label
+          ><small
+            >Base applications only. Updates, DLC and compressed packages are unsupported.
+            Extraction checks consistency, not publisher authenticity. Maximum total binary input:
+            256 MiB.</small
+          >
+        </div>
+        <label class="game"
+          >Optional shader jobs JSON<input id="shaders" type="file" accept=".json" /></label
+        ><small class="game"
+          >Shader JSON: array of { job, code }, where code is base64 Maxwell bytes. No shader
+          discovery or title-specific defaults.</small
+        >
+      </fieldset>
+      <fieldset>
+        <legend>3. Signing</legend>
+        <label><input id="sign" type="checkbox" /> Sign the IPA</label>
+        <div id="credentials" hidden>
+          <label>P12 identity<input id="identity" type="file" accept=".p12,.pfx" /></label
+          ><label
+            >Provisioning profile<input
+              id="provision"
+              type="file"
+              accept=".mobileprovision" /></label
+          ><label>P12 password<input id="password" type="password" autocomplete="off" /></label>
+        </div>
+      </fieldset>
+      <button id="build" type="submit">Create IPA</button
+      ><button id="cancel" type="button" disabled>Cancel</button
+      ><a id="download" hidden>Download IPA</a>
+      <p id="status" role="status">Ready.</p>
+    </form>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

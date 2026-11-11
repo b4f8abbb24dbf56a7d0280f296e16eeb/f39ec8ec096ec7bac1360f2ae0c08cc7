@@ -1,0 +1,23 @@
+[package]
+name = "nx2ipa_bridge"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nxb-image = { path = "../.build/nxkit/crates/nxb-image" }
+nxb-pyjson = { path = "../.build/nxkit/crates/nxb-pyjson" }
+nxtitle = { path = "../.build/nxkit/titles/nxtitle" }
+nxb-xlate = { path = "../.build/nxkit/crates/nxb-xlate" }
+air-front = { path = "../.build/nxkit/crates/air-front" }
+
+nxb-extract = { path = "../.build/nxkit/crates/nxb-extract", default-features = false }
+
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
