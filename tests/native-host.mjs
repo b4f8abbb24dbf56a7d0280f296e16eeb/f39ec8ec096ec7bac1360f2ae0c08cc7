@@ -36,7 +36,8 @@ const signing = await signingFixture("app.nx2ipa.game");
 const temporary = await mkdtemp(join(tmpdir(), "nx2ipa-native-contract-"));
 try {
   const input = containerSample(sample());
-  const result = await createIpa({ ...(capabilities.embeddedHost ? {} : { template }), nsp: input.nsp, keys: input.keys, signing });
+  const displayName = "Authored <NSP> & 🎮";
+  const result = await createIpa({ ...(capabilities.embeddedHost ? {} : { template }), nsp: input.nsp, keys: input.keys, profile: { name: displayName }, signing });
   assert.equal(result.signed, true);
   assert.equal(result.deviceValidated, false);
   assert.equal(result.shaderCount, 1);
@@ -58,6 +59,8 @@ try {
     if (path.endsWith("/")) await mkdir(destination, { recursive: true });
     else { await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, data); }
   }
+  if (capabilities.embeddedHost)
+    assert.equal(await command(["plutil", "-extract", "CFBundleDisplayName", "raw", "-o", "-", join(temporary, "Payload", receipt.appName, "Info.plist")]), displayName);
   console.log(await command(["cargo", "run", "--locked", "--manifest-path", "ios/Cargo.toml", "-p", "nx2ipa-ios-host", "--example", "validate_bundle", "--", join(temporary, "Payload", receipt.appName)]));
   await writeFile(join(artifact, "integration-test.json"), JSON.stringify({
     schema: 1, nativeHostSha256: receipt.binarySha256, librarySha256: sha(await readFile("dist/nx2ipa.js")),

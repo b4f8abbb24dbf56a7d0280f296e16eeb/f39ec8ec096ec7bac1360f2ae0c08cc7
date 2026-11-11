@@ -219,7 +219,8 @@ self.onmessage = async ({ data: input }) => {
   };
   try {
     progress("prepare");
-    const experimental = !input.template && embeddedHost?.experimental === true;
+    const builtInHost = !input.template && !!embeddedHost;
+    const experimental = builtInHost && embeddedHost.experimental === true;
     if (!input.template && embeddedHost) input.template = {
       name: embeddedHost.appName,
       files: Object.entries(unzipSync(decode(embeddedHost.zip)))
@@ -368,6 +369,12 @@ self.onmessage = async ({ data: input }) => {
       if (!ios(guest)) throw new Error("Expected iOS guest image");
       const gameFile = generated.files.find((file) => file.path === "game.json");
       const game = JSON.parse(text.decode(gameFile.data));
+      if (builtInHost) {
+        const plist = files.get("Info.plist");
+        const name = game.name.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+        plist.data = utf8.encode(text.decode(plist.data).replace("<dict>", () =>
+          `<dict><key>CFBundleDisplayName</key><string>${name}</string>`));
+      }
       game.dylib = "Frameworks/nxgame.dylib";
       game.romfs = "nxkit/romfs";
       game.romfs_empty =
