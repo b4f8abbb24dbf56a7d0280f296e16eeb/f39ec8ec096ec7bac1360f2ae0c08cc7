@@ -1,0 +1,47 @@
+[package]
+name = "nx2ipa-ios-input"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_svc_input"
+path = "../../.build/ios/input/src/lib.rs"
+
+[dependencies]
+nxkit-abi = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-core-foundation = { workspace = true, features = ["std"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSSet", "NSString"] }
+objc2-game-controller = { workspace = true, features = [
+    "std",
+    "objc2-core-foundation",
+    "objc2-core-haptics",
+    "GCController",
+    "GCControllerAxisInput",
+    "GCControllerButtonInput",
+    "GCControllerDirectionPad",
+    "GCControllerElement",
+    "GCDevice",
+    "GCDeviceHaptics",
+    "GCDeviceHapticsLocality",
+    "GCExtendedGamepad",
+    "GCKeyCodes",
+    "GCKeyboard",
+    "GCKeyboardInput",
+    "GCMotion",
+    "GCMouse",
+    "GCMouseInput",
+    "GCPhysicalInputProfile",
+] }
+objc2-core-haptics = { workspace = true, features = [
+    "std",
+    "CHHapticEngine",
+    "CHHapticEvent",
+    "CHHapticParameter",
+    "CHHapticPattern",
+    "CHHapticPatternPlayer",
+] }

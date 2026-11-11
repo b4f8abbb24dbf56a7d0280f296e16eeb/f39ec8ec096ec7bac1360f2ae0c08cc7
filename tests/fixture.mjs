@@ -260,6 +260,8 @@ export async function signingFixture() {
 export async function exercise(run) {
   const assert = (await import("node:assert/strict")).default;
   const { unzipSync } = await import("fflate");
+  const { exerciseContainers } = await import("./containers.mjs");
+  await exerciseContainers(run, sample());
   const request = sample(),
     caller = structuredClone(request),
     pending = run(caller);

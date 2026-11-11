@@ -3,3 +3,4 @@ node_modules/
 bridge/target/
 dist/
 *.wasm
+ios/target/

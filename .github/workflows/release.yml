@@ -22,21 +22,39 @@ jobs:
         run: cargo build --manifest-path bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown
         env:
           RUSTFLAGS: --cap-lints warn
-      - run: bun scripts/build.mjs
+      - name: Build the development preview without a synthetic host
+        run: bun scripts/build.mjs --allow-missing-host
       - name: Test the release library in Bun
         run: bun run test
       - run: bunx --no-install playwright install --with-deps chromium
       - name: Test the same release library in Chromium
         run: bun tests/browser.mjs
-      - run: bun scripts/release.mjs
+      - name: Test drag-and-drop UI
+        run: bun tests/ui.mjs
+      - run: bun scripts/release.mjs --preview
       - uses: actions/upload-artifact@v4
         with:
-          name: nx2ipa
+          name: nx2ipa-preview
           path: dist/
           if-no-files-found: error
+  ios:
+    name: Check the native iOS platform adapters
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: rustup toolchain install 1.99.0 --profile minimal --target aarch64-apple-ios
+      - run: bun scripts/source.mjs
+      - name: Link the UIKit, input and audio probe against the iOS SDK
+        run: bun scripts/build-ios.mjs --link-check
+        env:
+          RUSTFLAGS: --cap-lints warn
   pages:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
+    needs: [build, ios]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -49,7 +67,7 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/download-artifact@v4
         with:
-          name: nx2ipa
+          name: nx2ipa-preview
           path: dist
       - run: mv dist/nx2ipa.html dist/index.html
       - uses: actions/upload-pages-artifact@v3

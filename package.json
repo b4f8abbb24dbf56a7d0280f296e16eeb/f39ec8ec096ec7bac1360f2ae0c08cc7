@@ -17,6 +17,7 @@
     "zsign-wasm": "0.0.4"
   },
   "devDependencies": {
+    "basecoat-css": "1.1.0",
     "playwright": "1.65.0"
   },
   "packageManager": "bun@1.4.4"

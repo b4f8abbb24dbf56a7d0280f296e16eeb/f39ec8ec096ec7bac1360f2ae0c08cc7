@@ -1,8 +1,10 @@
 import workerSource from "nx2ipa:worker";
+export { default as capabilities } from "nx2ipa:capabilities";
 
 /** Build an IPA locally. Byte inputs are copied, never transferred from the
  * caller. A fresh worker owns each conversion and is terminated on abort. */
 export async function createIpa(request, { signal, onProgress } = {}) {
+  if (!request || typeof request !== "object") throw new TypeError("Expected conversion options");
   signal?.throwIfAborted();
   let total = 0;
   const copies = [];
@@ -13,6 +15,14 @@ export async function createIpa(request, { signal, onProgress } = {}) {
     const copy = new Uint8Array(value);
     copies.push(copy);
     return copy;
+  };
+  const container = (value) => {
+    if (value === undefined) return undefined;
+    if (value instanceof Blob) {
+      if (!Number.isSafeInteger(value.size) || !value.size) throw new Error("Empty or oversized container");
+      return value;
+    }
+    return bytes(value);
   };
   const files = (rows) => {
     if (!Array.isArray(rows) || rows.length > 20000) throw new Error("Invalid file list");
@@ -25,11 +35,14 @@ export async function createIpa(request, { signal, onProgress } = {}) {
   let input;
   try {
     input = {
-      template: { name: request.template.name, files: files(request.template.files) },
+      template: request.template
+        ? { name: request.template.name, files: files(request.template.files) }
+        : undefined,
       profile: request.profile,
       modules: request.modules?.map((module) => ({ name: module.name, data: bytes(module.data) })),
       npdm: request.npdm === undefined ? undefined : bytes(request.npdm),
-      nsp: request.nsp === undefined ? undefined : bytes(request.nsp),
+      nsp: container(request.nsp),
+      xci: container(request.xci),
       keys: request.keys === undefined ? undefined : bytes(request.keys),
       resources: files(request.resources ?? []),
       shaders: request.shaders?.map((shader) => ({
@@ -44,12 +57,15 @@ export async function createIpa(request, { signal, onProgress } = {}) {
           }
         : undefined,
     };
-    if (input.nsp && input.modules) throw new Error("Choose NSP or extracted modules");
-    if ((input.nsp || input.modules) && (!input.profile || typeof input.profile.name !== "string"))
-      throw new Error("Game builds require a profile with a name");
-    if (input.nsp && !input.keys) throw new Error("NSP input requires prod.keys bytes");
+    if ([input.nsp, input.xci, input.modules].filter(Boolean).length > 1)
+      throw new Error("Choose one NSP, XCI, or extracted module set");
+    if (input.modules && (!input.profile || typeof input.profile.name !== "string"))
+      throw new Error("Extracted modules require a profile with a name");
+    if ((input.nsp || input.xci) && !input.keys)
+      throw new Error("NSP/XCI input requires prod.keys bytes");
+    if (input.keys?.length > 1024 ** 2) throw new Error("prod.keys exceeds 1 MiB");
     if (input.modules && !input.npdm) throw new Error("Extracted modules require NPDM bytes");
-    if (input.shaders?.length && !input.nsp && !input.modules)
+    if (input.shaders?.length && !input.nsp && !input.xci && !input.modules)
       throw new Error("Shaders require a game build");
     if (
       input.signing &&

@@ -84,6 +84,7 @@ name = "nxb-extract"
 version = "0.10.0"
 dependencies = [
  "nxb-model",
+ "nxb-pyjson",
  "nxb-sys",
 ]
 

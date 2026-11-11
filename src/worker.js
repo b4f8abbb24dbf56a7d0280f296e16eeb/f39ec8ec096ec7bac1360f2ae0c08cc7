@@ -1,9 +1,16 @@
-import { zipSync } from "fflate";
+import { zipSync, unzipSync, inflateSync } from "fflate";
 import { bridgeWasm, zsignWasm } from "nx2ipa:assets";
+import embeddedHost from "nx2ipa:host";
 import createSigner from "nx2ipa:signer";
 
-const decode = (text) => Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
+const decode = (text) => {
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(text);
+  const binary = atob(text), bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+};
 const encode = (bytes) => {
+  if (bytes.toBase64) return bytes.toBase64();
   let text = "";
   for (let at = 0; at < bytes.length; at += 32768)
     text += String.fromCharCode(...bytes.subarray(at, at + 32768));
@@ -46,6 +53,38 @@ function directory(files, directories, name) {
     index.directories.add(parent);
   }
   directories.add(name);
+}
+function nameFromNacp(bytes) {
+  let names = bytes, count = 16;
+  // New SDKs deflate the language table. Bound expansion to the fixed table.
+  const size = bytes.length > 1 ? bytes[0] | (bytes[1] << 8) : 0;
+  if (size > 0 && size <= 0x2ffe && bytes.length >= size + 2) {
+    try {
+      const inflated = inflateSync(bytes.subarray(2, size + 2), { out: new Uint8Array(0x6000) });
+      if (inflated.length === 0x6000) { names = inflated; count = 32; }
+    } catch { /* Legacy NACP stores plain UTF-8 in the same bytes. */ }
+  }
+  for (let i = 0; i < count; i++) {
+    const field = names.subarray(i * 0x300, i * 0x300 + 0x200);
+    const zero = field.indexOf(0);
+    const name = new TextDecoder().decode(zero < 0 ? field : field.subarray(0, zero)).trim();
+    if (name && !/[\x00-\x1f\x7f\ufffd]/.test(name)) return name;
+  }
+  return undefined;
+}
+function inferModules(modules) {
+  // ExeFS physical/PFS0 order is not necessarily the loader's module order.
+  const rank = (name) => name === "main" ? 0
+    : /^subsdk[0-9]$/.test(name) ? 1 + Number(name.slice(6))
+    : name === "sdk" ? 11 : -1;
+  const selected = modules.filter((module) => module.name !== "rtld");
+  if (selected.some((module) => rank(module.name) < 0))
+    throw new Error("Unknown ExeFS module name; explicit module load order is required");
+  return selected.sort((a, b) => rank(a.name) - rank(b.name)).map((module) => ({
+    name: module.name,
+    buildId: [...module.data.subarray(0x40, 0x50)]
+      .map((value) => value.toString(16).padStart(2, "0")).join(""),
+  }));
 }
 function ios(bytes) {
   if (bytes.length < 32) return false;
@@ -180,6 +219,13 @@ self.onmessage = async ({ data: input }) => {
   };
   try {
     progress("prepare");
+    if (!input.template && embeddedHost) input.template = {
+      name: embeddedHost.appName,
+      files: Object.entries(unzipSync(decode(embeddedHost.zip)))
+        .filter(([path]) => !path.endsWith("/"))
+        .map(([path, data]) => ({ path, data, executable: path === embeddedHost.executable || ios(data) })),
+    };
+    if (!input.template) throw new Error("This build does not include an iOS host runtime");
     if (!/^[A-Za-z0-9_-]+\.app$/.test(input.template.name)) throw new Error("Invalid app name");
     let files = new Map();
     const directories = new Set();
@@ -195,9 +241,34 @@ self.onmessage = async ({ data: input }) => {
       ![...files.values()].some((file) => file.executable && ios(file.data))
     )
       throw new Error("An unsigned arm64 iOS host template is required");
-    if (input.nsp || input.modules) {
-      const { instance } = await WebAssembly.instantiate(decode(bridgeWasm), {}),
-        wasm = instance.exports;
+    const warnings = [];
+    if (input.nsp || input.xci || input.modules) {
+      let source = input.nsp ?? input.xci;
+      let reader;
+      if (source instanceof Blob) {
+        if (typeof FileReaderSync === "function") reader = new FileReaderSync();
+        else {
+          if (source.size > 256 * 1024 ** 2)
+            throw new Error("This runtime buffers Blob inputs; its container limit is 256 MiB. Use a browser with FileReaderSync for larger containers");
+          source = new Uint8Array(await source.arrayBuffer());
+        }
+      }
+      let wasm, instance;
+      ({ instance } = await WebAssembly.instantiate(decode(bridgeWasm), {
+        nx2ipa: { read(offset, destination, length) {
+          const start = Number(offset), end = start + length;
+          const size = source instanceof Blob ? source.size : source?.length;
+          if (!Number.isSafeInteger(start) || start < 0 || end > size) return 1;
+          try {
+            const bytes = source instanceof Blob
+              ? new Uint8Array(reader.readAsArrayBuffer(source.slice(start, end)))
+              : source.subarray(start, end);
+            new Uint8Array(wasm.memory.buffer, destination, length).set(bytes);
+            return 0;
+          } catch { return 1; }
+        } },
+      }));
+      wasm = instance.exports;
       const invoke = (request) => {
         const bytes = utf8.encode(JSON.stringify({ version: 1, ...request }));
         const pointer = wasm.nx2ipa_alloc(bytes.length);
@@ -208,7 +279,7 @@ self.onmessage = async ({ data: input }) => {
           output = Number(packed >> 32n);
           size = Number(packed & 0xffffffffn);
           const result = JSON.parse(text.decode(new Uint8Array(wasm.memory.buffer, output, size)));
-          if (!result.ok) throw new Error("Conversion input rejected");
+          if (!result.ok) throw new Error(result.error || "Conversion input rejected");
           return result;
         } finally {
           bytes.fill(0);
@@ -220,13 +291,14 @@ self.onmessage = async ({ data: input }) => {
         npdm = input.npdm,
         resources = input.resources;
       directory(files, directories, "nxkit/romfs");
-      if (input.nsp) {
+      if (source) {
         progress("extract");
         const extracted = invoke({
           op: "extract",
-          nsp: encode(input.nsp),
+          sourceSize: source instanceof Blob ? source.size : source.length,
           keys: encode(input.keys),
         });
+        input.profile ??= {};
         if (
           input.profile.titleId &&
           input.profile.titleId.toLowerCase() !== extracted.titleId.toLowerCase()
@@ -239,6 +311,9 @@ self.onmessage = async ({ data: input }) => {
         )
           throw new Error("Version mismatch");
         input.profile.version = extracted.metadata.version;
+        const control = extracted.files.find((file) => file.path === "control.nacp");
+        input.profile.name ??= (control && nameFromNacp(decode(control.data))) || `Game ${extracted.titleId}`;
+        input.profile.versionName ??= extracted.metadata.versionName;
         modules = extracted.modules.map((module) => ({
           name: module.name,
           data: decode(module.data),
@@ -250,16 +325,11 @@ self.onmessage = async ({ data: input }) => {
           ...resources,
         ];
         input.keys.fill(0);
+        source = input.nsp = input.xci = undefined;
       }
-      if (!input.profile.modules)
-        input.profile.modules = modules
-          .filter((module) => module.name !== "rtld")
-          .map((module) => ({
-            name: module.name,
-            buildId: [...module.data.subarray(0x40, 0x50)]
-              .map((value) => value.toString(16).padStart(2, "0"))
-              .join(""),
-          }));
+      if (!input.profile.modules) input.profile.modules = inferModules(modules);
+      if (!input.shaders?.length)
+        warnings.push("No shaders were compiled. Shader discovery and gameplay compatibility are not verified.");
       progress("build");
       const generated = invoke({
         op: "buildRunfolder",
@@ -276,11 +346,16 @@ self.onmessage = async ({ data: input }) => {
           }).files,
         );
       }
+      // Let the engine reclaim the large linear memory before decoding and
+      // packaging the generated files. Never retain both base64 and bytes.
+      wasm = instance = modules = npdm = input.modules = input.npdm = undefined;
       progress("assemble");
-      if (!ios(decode(generated.files.find((file) => file.path === "nxgame.dylib").data)))
-        throw new Error("Expected iOS guest image");
+      for (const file of generated.files) file.data = decode(file.data);
+      const guestFile = generated.files.find((file) => file.path === "nxgame.dylib");
+      const guest = guestFile.data;
+      if (!ios(guest)) throw new Error("Expected iOS guest image");
       const gameFile = generated.files.find((file) => file.path === "game.json");
-      const game = JSON.parse(text.decode(decode(gameFile.data)));
+      const game = JSON.parse(text.decode(gameFile.data));
       game.dylib = "Frameworks/nxgame.dylib";
       game.romfs = "nxkit/romfs";
       game.romfs_empty =
@@ -293,7 +368,7 @@ self.onmessage = async ({ data: input }) => {
         for (const field of ["image", "imports", "exports", "gates", "fixups"])
           if (module[field]) module[field] = "nxkit/" + path(module[field]);
       for (const file of [
-        ...generated.files.map((file) => ({ path: file.path, data: decode(file.data) })),
+        ...generated.files,
         ...resources,
       ]) {
         const name =
@@ -332,12 +407,17 @@ self.onmessage = async ({ data: input }) => {
         { os: 3, attrs: (0o40755 << 16) >>> 0, mtime: new Date("2000-01-01T00:00:00Z") },
       ];
     const ipa = zipSync(archive, { level: 0 });
-    self.postMessage({ result: { ipa, signed: !!input.signing, deviceValidated: false } }, [
+    self.postMessage({ result: {
+      ipa, signed: !!input.signing, deviceValidated: false, warnings,
+      name: input.profile?.name || input.template.name.slice(0, -4),
+      titleId: input.profile?.titleId,
+    } }, [
       ipa.buffer,
     ]);
-  } catch {
+  } catch (error) {
+    const reason = String(error?.message || "Check the selected inputs.").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 500);
     self.postMessage({
-      error: `Conversion failed during ${stage ?? "startup"}. Check the selected inputs.`,
+      error: `Conversion failed during ${stage ?? "startup"}. ${reason}`,
     });
   } finally {
     input.keys?.fill(0);

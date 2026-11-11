@@ -1,0 +1,19 @@
+[package]
+name = "nx2ipa-ios-audio"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "nxkit_svc_audio"
+path = "../../.build/ios/audio/src/lib.rs"
+
+[dependencies]
+nxkit-abi = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, features = ["std"] }
+objc2-audio-toolbox = { workspace = true, features = ["std", "objc2-core-audio-types", "AudioComponent", "AUComponent", "AudioOutputUnit"] }
+objc2-core-audio-types = { workspace = true, features = ["std", "CoreAudioBaseTypes"] }
+objc2-avf-audio = { workspace = true, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }

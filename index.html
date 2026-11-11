@@ -3,133 +3,93 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>nx2ipa</title>
-    <style>
-      body {
-        font: 16px system-ui;
-        max-width: 760px;
-        margin: 40px auto;
-        padding: 0 20px;
-        background: #101318;
-        color: #edf2f7;
-      }
-      h1 {
-        font-size: 32px;
-      }
-      fieldset {
-        border: 1px solid #405064;
-        margin: 20px 0;
-        padding: 18px;
-        border-radius: 12px;
-      }
-      label {
-        display: block;
-        margin: 12px 0;
-      }
-      input,
-      select,
-      button {
-        font: inherit;
-      }
-      input[type="file"] {
-        display: block;
-        width: 100%;
-        margin-top: 6px;
-      }
-      textarea {
-        display: block;
-        width: 100%;
-        min-height: 65px;
-        box-sizing: border-box;
-      }
-      button,
-      a {
-        padding: 10px 16px;
-      }
-      a {
-        color: #89c5ff;
-      }
-      small {
-        color: #a8b6c5;
-      }
-      .hidden,
-      [hidden] {
-        display: none;
-      }
-    </style>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="Create an unsigned IPA from your own NSP or XCI, locally in your browser." />
+    <title>nx2ipa · Local IPA builder</title>
+    <link rel="stylesheet" href="./node_modules/basecoat-css/dist/basecoat.cdn.min.css" />
+    <link rel="stylesheet" href="./src/app.css" />
   </head>
   <body>
-    <h1>nx2ipa</h1>
-    <p>Convert locally to an IPA. Nothing is uploaded.</p>
-    <p>
-      <small
-        >Requires your own compatible unsigned arm64 iOS host template. A signed archive does not
-        establish Apple trust, installation or gameplay.</small
-      >
-    </p>
-    <form id="form">
-      <fieldset>
-        <legend>1. Host template</legend>
-        <label
-          >Unsigned .app folder<input id="template" type="file" webkitdirectory required
-        /></label>
-        <label
-          >Executable paths inside the .app, one per line<textarea
-            id="executables"
-            required
-            placeholder="Game"
-          ></textarea>
-        </label>
-      </fieldset>
-      <fieldset>
-        <legend>2. Game</legend>
-        <label
-          >Input<select id="mode">
-            <option value="extracted">Extracted NSO files</option>
-            <option value="nsp">Base NSP</option>
-            <option value="app">Package existing app only</option>
-          </select></label
-        >
-        <label class="game">Profile JSON<input id="profile" type="file" accept=".json" /></label>
-        <div id="extracted">
-          <label>NSO modules<input id="modules" type="file" multiple /></label
-          ><label>main.npdm<input id="npdm" type="file" /></label
-          ><label>Optional RomFS folder<input id="romfs" type="file" webkitdirectory /></label>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="#main" aria-label="nx2ipa home">
+          <span class="brand-icon" aria-hidden="true">nx</span>
+          <span>nx2ipa</span>
+        </a>
+        <span class="badge local-badge" data-variant="outline"><span class="status-dot" aria-hidden="true"></span>Runs on your device</span>
+      </header>
+      <main id="main">
+        <div class="intro">
+          <p class="eyebrow">NSP / XCI → IPA</p>
+          <h1>Your game. Your device.</h1>
+          <p class="lede">Drop your game and prod.keys. Build an IPA in your browser, with nothing sent to a server.</p>
         </div>
-        <div id="raw" hidden>
-          <label>Base NSP<input id="nsp" type="file" accept=".nsp" /></label
-          ><label>Your local prod.keys<input id="keys" type="file" /></label
-          ><small
-            >Base applications only. Updates, DLC and compressed packages are unsupported.
-            Extraction checks consistency, not publisher authenticity. Maximum total binary input:
-            256 MiB.</small
-          >
+        <aside id="runtime-notice" class="runtime-notice" role="note" hidden>
+          <strong>iOS runtime not included</strong>
+          <p>This version cannot create a game IPA yet. No extra files are needed from you.</p>
+        </aside>
+        <form id="form" novalidate>
+          <div class="card converter">
+            <header>
+              <h2>Create an IPA</h2>
+              <p>One game and your own keys. Files stay local.</p>
+              <span class="badge card-action" data-variant="secondary">Local only</span>
+            </header>
+            <section class="converter-body">
+              <input id="files" type="file" accept=".nsp,.xci,.keys" multiple hidden />
+              <button id="dropzone" class="dropzone" type="button" aria-describedby="drop-hint support-note">
+                <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m-4 4 4-4 4 4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" /></svg></span>
+                <span class="drop-title">Drop your files here</span>
+                <span id="drop-hint" class="drop-hint">One .nsp or .xci + your prod.keys</span>
+                <span class="browse-link">or choose files <span aria-hidden="true">↗</span></span>
+              </button>
+              <div class="selection" aria-label="Selected files">
+                <div class="file-row" id="game-row">
+                  <span class="file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 3v6h6V3M9 17h6"/></svg></span>
+                  <div class="file-copy"><span class="file-label">Game file</span><span class="file-name" id="game-name">No NSP or XCI selected</span></div>
+                  <span class="file-size" id="game-size"></span>
+                  <button id="remove-game" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove game file" hidden>×</button>
+                </div>
+                <div class="file-row" id="keys-row">
+                  <span class="file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3"/></svg></span>
+                  <div class="file-copy"><span class="file-label">Local keys</span><span class="file-name" id="keys-name">No prod.keys selected</span></div>
+                  <span class="file-size" id="keys-size"></span>
+                  <button id="remove-keys" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove prod.keys" hidden>×</button>
+                </div>
+              </div>
+              <div class="status-area" id="status-area" data-state="idle">
+                <div class="status-line"><span id="status-mark" aria-hidden="true"></span><p id="status" role="status" aria-live="polite" aria-atomic="true">Choose your game and keys to get started.</p></div>
+                <progress id="progress" class="progress" aria-label="Creating IPA" hidden></progress>
+              </div>
+              <div id="result" class="result" hidden>
+                <div class="result-heading"><strong>IPA created</strong><span class="badge" data-variant="outline" id="result-kind">Unsigned</span></div>
+                <p id="result-summary"></p>
+                <a id="download" class="btn" hidden>Download IPA <span aria-hidden="true">↓</span></a>
+                <ul id="warnings" class="warnings"></ul>
+              </div>
+            </section>
+            <footer class="converter-actions">
+              <p class="privacy-note"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/></svg>No uploads. No saved keys.</p>
+              <div class="actions"><button id="cancel" class="btn" data-variant="outline" type="button" hidden disabled>Cancel</button><button id="build" class="btn" type="submit" disabled>Create IPA <span aria-hidden="true">→</span></button></div>
+            </footer>
+          </div>
+        </form>
+        <div class="below-card">
+          <p id="support-note">Base applications only. Updates, DLC, NSZ and XCZ are not supported.</p>
+          <details class="limitations">
+            <summary>Before you build</summary>
+            <div>
+              <p>Use game backups and keys you have the right to use. Select both files together, or add them one at a time.</p>
+              <p>The IPA is unsigned. Signing and installation happen separately. Creating an archive does not verify device compatibility or gameplay.</p>
+              <p>Game archives are read in chunks. Extracted game data is currently limited to 256 MiB, so larger titles may not build. Extraction checks consistency, not publisher authenticity.</p>
+              <p>Your files stay in this page's memory. Keys are released when a build finishes or is cancelled. Closing the page clears the session.</p>
+            </div>
+          </details>
         </div>
-        <label class="game"
-          >Optional shader jobs JSON<input id="shaders" type="file" accept=".json" /></label
-        ><small class="game"
-          >Shader JSON: array of { job, code }, where code is base64 Maxwell bytes. No shader
-          discovery or title-specific defaults.</small
-        >
-      </fieldset>
-      <fieldset>
-        <legend>3. Signing</legend>
-        <label><input id="sign" type="checkbox" /> Sign the IPA</label>
-        <div id="credentials" hidden>
-          <label>P12 identity<input id="identity" type="file" accept=".p12,.pfx" /></label
-          ><label
-            >Provisioning profile<input
-              id="provision"
-              type="file"
-              accept=".mobileprovision" /></label
-          ><label>P12 password<input id="password" type="password" autocomplete="off" /></label>
-        </div>
-      </fieldset>
-      <button id="build" type="submit">Create IPA</button
-      ><button id="cancel" type="button" disabled>Cancel</button
-      ><a id="download" hidden>Download IPA</a>
-      <p id="status" role="status">Ready.</p>
-    </form>
+      </main>
+      <footer class="site-footer"><span>nx2ipa · Browser-native packaging</span><span>Built with <a href="https://basecoatui.com/" target="_blank" rel="noopener noreferrer">Basecoat</a></span></footer>
+    </div>
+    <noscript><p class="noscript">Enable JavaScript to create an IPA locally in your browser.</p></noscript>
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>

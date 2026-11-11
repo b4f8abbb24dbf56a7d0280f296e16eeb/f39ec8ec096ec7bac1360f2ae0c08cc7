@@ -7,21 +7,26 @@ Exports: `memory`, `nx2ipa_abi_version()` (1), `nx2ipa_alloc(length)`,
 `nx2ipa_dealloc(pointer,length)`, `nx2ipa_call(pointer,length)`.
 The call result is a u64: output pointer in the high 32 bits, length in the low
 32 bits. Inputs and outputs are UTF-8 JSON. The caller frees both allocations
-exactly once. Calls are synchronous and intended for a dedicated worker.
+exactly once. Calls are synchronous and intended for a dedicated worker. The WASM import
+`nx2ipa.read(offset:i64,destination:i32,length:i32)->i32` copies a local container
+range into WASM memory (zero on success). No file bytes are sent over a network.
 
 Every request has `version:1` and `op`. Binary values are standard padded base64.
 Every response has `version:1`, `ok`, and either the result fields or `error`.
 
-- `extract`: `nsp` and `keys` (UTF-8 prod.keys encoded as base64). Returns
+- `extract`: `sourceSize` for imported random-access reads (or base64 `nsp`/`xci`)
+  and `keys` (UTF-8 prod.keys encoded as base64). Returns
   `titleId`, `modules:[{name,data}]`, `npdm`, `files:[{path,data}]`, and metadata.
   This is consistency checking, not signature authentication. Only the supported
-  single-application NSP layout is accepted; updates/DLC are not merged.
+  single-application NSP/XCI layout is accepted, optionally with one bundled
+  matching update. Update-only, DLC and multi-title inputs are rejected. Control
+  NACP/icon bytes accompany the extracted files for automatic metadata inference.
 - `buildRunfolder`: `modules:[{name,data}]`, `npdm`, and `profile`.
   Profile requires `titleId` (hex), `name`, `modules:[{name,buildId}]` in load order.
   Optional fields are `version`, `versionName`, `rules` (patch TOML), `settings`,
   `memory`, `services`, and `nvnFunctions`. Settings/memory explicitly override
-  upstream defaults in game.json. The caller supplies a profile appropriate for
-  the exact game build; there is no automatic title selection.
+  upstream defaults in game.json. The JS adapter infers standard module order and IDs for raw containers;
+  title-specific settings/patch rules are not guessed.
 - `compileShaders`: `jobs:[{job,code}]`, where `job` is an upstream nxkit shader
   job object and `code` is explicit machine-code bytes. Translates and compiles
   with the portable compiler for iOS. Unsupported inputs fail rather than using
