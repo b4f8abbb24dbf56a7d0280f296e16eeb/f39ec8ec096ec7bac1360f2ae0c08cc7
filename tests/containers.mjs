@@ -167,6 +167,29 @@ export async function exerciseContainers(run, sample) {
   }
   const merged = containerSample(sample, { update: true });
   const updateOnly = containerSample(sample, { updateOnly: true });
+  // Separate sources exercise both indexed readers and shared Control deduplication.
+  for (const kind of ["nsp", "xci"]) {
+    const expected = await run({ ...base, [kind]: merged[kind] });
+    for (const updateKind of ["nsp", "xci"]) {
+      for (const blob of [false, true]) {
+        const wrap = (value) => blob ? new Blob([value]) : value;
+        const request = { ...base, [kind]: wrap(fixture[kind]), update: wrap(updateOnly[updateKind]) };
+        const result = await run(request);
+        assert.deepEqual(result.ipa, expected.ipa);
+        if (!blob) assert.deepEqual(request.update, updateOnly[updateKind]);
+      }
+    }
+  }
+  const separate = { ...base, nsp: fixture.nsp, update: updateOnly.nsp };
+  await assert.rejects(run({ ...base, update: updateOnly.nsp }), /requires a base/);
+  await assert.rejects(run({ ...separate, update: fixture.nsp }), /base-only application and an update-only/);
+  await assert.rejects(run({ ...separate, nsp: merged.nsp }), /base-only application and an update-only/);
+  await assert.rejects(run({ ...separate, update: containerSample(sample, { updateOnly: true, wrongPatchTitle: true }).nsp }), /does not match/);
+  await assert.rejects(run({ ...separate, update: updateOnly.nsp.slice(0, 700) }), /during extract/);
+  const changedIcon = gameIcon.slice(); changedIcon[changedIcon.length - 1] ^= 1;
+  await assert.rejects(run({ ...separate, update: containerSample(sample, { updateOnly: true, icon: changedIcon }).nsp }), /conflicting NCA content ID/);
+  await assert.rejects(run(separate, { abortAt: "extract" }), { name: "AbortError" });
+  console.log("Passed: separate base/update NSP/XCI combinations, bytes and Blobs, identical bundled IPA, shared-content deduplication, wrong-title/conflicting/invalid inputs and cancellation.");
   const wrongPatch = containerSample(sample, { wrongPatchTitle: true });
   for (const kind of ["nsp", "xci"]) {
     const result = await run({ ...base, [kind]: merged[kind] });

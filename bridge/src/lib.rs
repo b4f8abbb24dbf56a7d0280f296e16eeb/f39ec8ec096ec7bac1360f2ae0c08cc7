@@ -471,7 +471,7 @@ pub fn process(input: &[u8]) -> Vec<u8> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn nx2ipa_abi_version() -> u32 {
-    1
+    2
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn nx2ipa_alloc(len: usize) -> *mut u8 {

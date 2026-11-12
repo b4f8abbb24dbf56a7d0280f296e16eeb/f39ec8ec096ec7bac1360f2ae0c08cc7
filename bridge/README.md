@@ -9,23 +9,25 @@ The bridge calls the loader-based rewrite helper and byte writers, not the inclu
 filesystem or native-signing helpers. Update the paths in `src/image.rs` if these
 internal modules move upstream.
 
-Exports: `memory`, `nx2ipa_abi_version()` (1), `nx2ipa_alloc(length)`,
+Exports: `memory`, `nx2ipa_abi_version()` (2), `nx2ipa_alloc(length)`,
 `nx2ipa_dealloc(pointer,length)`, `nx2ipa_call(pointer,length)`.
 The call result is a u64: output pointer in the high 32 bits, length in the low
 32 bits. Inputs and outputs are UTF-8 JSON. The caller frees both allocations
 exactly once. Calls are synchronous and intended for a dedicated worker. The WASM import
-`nx2ipa.read(offset:i64,destination:i32,length:i32)->i32` copies a local container
-range into WASM memory (zero on success). No file bytes are sent over a network.
+`nx2ipa.read(source:i32,offset:i64,destination:i32,length:i32)->i32` copies a local container
+range into WASM memory (source 0 for base, 1 for update; zero on success). No file bytes are sent over a network.
 
+ABI 2 adds the source index to the read import; the JSON protocol remains version 1.
 Every request has `version:1` and `op`. Binary values are standard padded base64.
 Every response has `version:1`, `ok`, and either the result fields or `error`.
 
 - `extract`: `sourceSize` for imported random-access reads (or base64 `nsp`/`xci`)
+  with optional `updateSize` (or base64 `update`),
   and `keys` (UTF-8 prod.keys encoded as base64). Returns
   `titleId`, `modules:[{name,data}]`, `npdm`, `files:[{path,data}]`, and metadata.
   This is consistency checking, not signature authentication. Only the supported
   single-application NSP/XCI layout is accepted, optionally with one bundled
-  matching update. Update-only, DLC and multi-title inputs are rejected. Control
+  matching update, or a separate matching update-only NSP/XCI. Update-only conversion, DLC and multi-title inputs are rejected. Control
   NACP/icon bytes accompany the extracted files for automatic metadata inference.
 - `buildRunfolder`: `modules:[{name,data}]`, `npdm`, and `profile`.
   Profile requires `titleId` (hex), `name`, `modules:[{name,buildId}]` in load order.

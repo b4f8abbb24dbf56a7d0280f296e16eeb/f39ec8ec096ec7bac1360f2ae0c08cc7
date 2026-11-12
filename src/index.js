@@ -43,6 +43,7 @@ export async function createIpa(request, { signal, onProgress } = {}) {
       npdm: request.npdm === undefined ? undefined : bytes(request.npdm),
       nsp: container(request.nsp),
       xci: container(request.xci),
+      update: container(request.update),
       keys: request.keys === undefined ? undefined : bytes(request.keys),
       resources: files(request.resources ?? []),
       shaders: request.shaders?.map((shader) => ({
@@ -59,6 +60,8 @@ export async function createIpa(request, { signal, onProgress } = {}) {
     };
     if ([input.nsp, input.xci, input.modules].filter(Boolean).length > 1)
       throw new Error("Choose one NSP, XCI, or extracted module set");
+    if (input.update && !input.nsp && !input.xci)
+      throw new Error("A separate update requires a base NSP or XCI");
     if (input.modules && (!input.profile || typeof input.profile.name !== "string"))
       throw new Error("Extracted modules require a profile with a name");
     if ((input.nsp || input.xci) && !input.keys)

@@ -54,6 +54,11 @@
                   <span class="file-size" id="game-size"></span>
                   <button id="remove-game" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove game file" hidden>×</button>
                 </div>
+                <div class="file-row" id="update-row">
+                  <div class="file-copy"><span class="file-label">Update (optional)</span><span class="file-name" id="update-name">No update selected</span></div>
+                  <span class="file-size" id="update-size"></span>
+                  <button id="remove-update" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove update file" hidden>×</button>
+                </div>
                 <div class="file-row" id="keys-row">
                   <span class="file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3"/></svg></span>
                   <div class="file-copy"><span class="file-label">Local keys</span><span class="file-name" id="keys-name">No prod.keys selected</span></div>
@@ -61,6 +66,8 @@
                   <button id="remove-keys" class="btn" data-variant="ghost" data-size="icon-sm" type="button" aria-label="Remove prod.keys" hidden>×</button>
                 </div>
               </div>
+              <label for="update-file">Add a separate update (optional .nsp or .xci)</label>
+              <input id="update-file" class="input" type="file" accept=".nsp,.xci" aria-describedby="support-note" />
               <div class="signing">
                 <label class="signing-toggle" for="signing-enabled"><input id="signing-enabled" type="checkbox" aria-controls="signing-fields" />Sign this IPA locally <span class="badge" data-variant="outline">Optional</span></label>
                 <p class="signing-help">Use your own Apple certificate and matching provisioning profile. Nothing is uploaded or saved.</p>
@@ -93,7 +100,7 @@
           </div>
         </form>
         <div class="below-card">
-          <p id="support-note">One base game, optionally with a bundled update. Update-only files, DLC, NSZ and XCZ are not supported.</p>
+          <p id="support-note">One base game, optionally with one bundled or separate update. Add separate updates with the update picker. Update-only conversion, DLC, NSZ and XCZ are not supported.</p>
           <details class="limitations">
             <summary>Before you build</summary>
             <div>

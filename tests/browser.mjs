@@ -21,7 +21,7 @@ try {
   // The real standalone HTML never asks for runtime templates or game profiles. A build
   // without the required runtime must be visibly blocked, not fake success.
   await page.goto(pathToFileURL(new URL("../dist/nx2ipa.html", import.meta.url).pathname).href);
-  assert.equal(await page.locator("input[type=file]").count(), 3);
+  assert.equal(await page.locator("input[type=file]").count(), 4);
   assert.equal(await page.locator("#template,#profile,#shaders").count(), 0);
   assert.equal(await page.locator("#experimental-notice").isVisible(),
     capabilities.embeddedHost && capabilities.experimental === true);
@@ -51,6 +51,26 @@ try {
       if (capabilities.experimental) assert.match(await page.locator("#warnings").textContent(), /Experimental build/);
       assert.match(await page.locator("#keys-name").textContent(), /No prod.keys/);
     }
+    const patch = containerSample(sample(), { updateOnly: true });
+    await page.locator("#files").setInputFiles([
+      { name: "Base.xci", mimeType: "application/octet-stream", buffer: Buffer.from(raw.xci) },
+      { name: "prod.keys", mimeType: "text/plain", buffer: Buffer.from(raw.keys) },
+    ]);
+    await page.locator("#update-file").setInputFiles({ name: "Update.nsp", mimeType: "application/octet-stream", buffer: Buffer.from(patch.nsp) });
+    await page.locator("#build").click();
+    await page.waitForFunction(() => document.getElementById("form").getAttribute("aria-busy") === "false");
+    assert.match(await page.locator("#status").textContent(), /^Unsigned IPA ready/);
+    const updatedGame = await page.evaluate(async () => {
+      const bytes = new Uint8Array(await (await fetch(document.getElementById("download").href)).arrayBuffer());
+      let binary = "";
+      for (let at = 0; at < bytes.length; at += 32768)
+        binary += String.fromCharCode(...bytes.subarray(at, at + 32768));
+      return btoa(binary);
+    });
+    const updatedFiles = unzipSync(new Uint8Array(Buffer.from(updatedGame, "base64")));
+    const manifest = JSON.parse(new TextDecoder().decode(updatedFiles["Payload/Nx2ipa.app/game.json"]));
+    assert.equal(manifest.version_number, 131072);
+    assert.equal(manifest.modules[0].build_id.toLowerCase(), "02".repeat(16));
     // Use ephemeral, non-Apple-trusted credentials against the actual HTML,
     // embedded host and worker. No real certificate is used or committed.
     const signing = await signingFixture("app.nx2ipa.game");

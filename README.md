@@ -9,6 +9,7 @@ import { createIpa, capabilities } from "./nx2ipa.js";
 const { ipa, name, signed, warnings } = await createIpa({
   nsp: gameFile, // Browser File/Blob or Uint8Array; use xci for a cartridge dump.
   keys: new Uint8Array(await keysFile.arrayBuffer()),
+  // update: updateFile, // Optional separate NSP/XCI update, also File/Blob or Uint8Array.
   // template: { name, files } is available for integration tests/custom hosts.
 });
 ```
@@ -19,7 +20,7 @@ The built-in host uses the game's Control NACP title for its installed display n
 
 Discovery includes nxkit’s BNSH/BAHS, compressed and archive readers, zstd dictionaries and Unity type-tree second pass. Unknown formats may contain shaders the readers cannot find; a zero count produces a warning. Recognized malformed or unsupported shaders fail conversion, rather than silently leaving out a failed shader. Title-specific graphics query facts are not inferred, and the portable compiler has no Apple compiler fallback or device validation. Discovery does not establish gameplay compatibility.
 
-A single base application with at most one bundled update is accepted from NSP or the XCI secure partition. Update-only inputs, DLC, multi-title packages and NCZ are unsupported. Extraction checks section hashes and metadata consistency, not Nintendo signatures or CNMT content hashes. XCI HFS0 hashes are not authenticated.
+A single base application with at most one update is accepted from NSP or the XCI secure partition. Updates may be bundled with the base or supplied separately through `update` in the API or the optional update picker on the page. Separate inputs must contain a base-only application and a matching update-only package; identical shared NCAs are deduplicated, conflicting content IDs are rejected. Update-only conversion, DLC, multi-title packages and NCZ are unsupported. Extraction checks section hashes and metadata consistency, not Nintendo signatures or CNMT content hashes. XCI HFS0 hashes are not authenticated.
 
 Browser workers read File/Blob slices on demand, so container padding does not require a full memory copy. Byte-array inputs and Blob inputs in runtimes without `FileReaderSync` are limited to 256 MiB; extracted game data is also limited to 256 MiB. Rewriting and ZIP packaging still run in memory, so this is not support for arbitrary multi-gigabyte games. `AbortSignal` cancellation terminates the worker.
 

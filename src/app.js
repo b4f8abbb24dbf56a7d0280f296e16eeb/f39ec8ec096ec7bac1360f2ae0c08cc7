@@ -1,7 +1,7 @@
 import { createIpa, capabilities } from "./index.js";
 
 const $ = (id) => document.getElementById(id);
-const selected = { game: undefined, keys: undefined };
+const selected = { game: undefined, update: undefined, keys: undefined };
 let controller, outputUrl, clearActiveSecrets, generation = 0, dragDepth = 0;
 const available = capabilities.embeddedHost === true;
 const experimental = available && capabilities.experimental === true;
@@ -40,13 +40,14 @@ const signingProblem = () => {
   return password.includes("\0") || password.length > 16384 ? "Invalid certificate password." : "";
 };
 const render = () => {
-  for (const kind of ["game", "keys"]) {
+  for (const kind of ["game", "update", "keys"]) {
     const file = selected[kind];
     $(`${kind}-row`).dataset.selected = String(!!file);
-    $(`${kind}-name`).textContent = file?.name ?? (kind === "game" ? "No NSP or XCI selected" : "No prod.keys selected");
+    $(`${kind}-name`).textContent = file?.name ?? (kind === "game" ? "No NSP or XCI selected" : kind === "update" ? "No update selected" : "No prod.keys selected");
     $(`${kind}-size`).textContent = file ? size(file.size) : "";
     $(`remove-${kind}`).hidden = !file;
   }
+  $("update-file").disabled = !selected.game;
   $("signing-enabled").disabled = !!controller;
   $("signing-fields").hidden = !$("signing-enabled").checked;
   $("signing-fields").disabled = !!controller || !$("signing-enabled").checked;
@@ -93,6 +94,7 @@ function accept(files) {
       next[kind] = file;
     }
     reset();
+    if (next.game) selected.update = undefined;
     Object.assign(selected, next);
     status(ready());
     render();
@@ -105,6 +107,19 @@ $("dropzone").onclick = () => $("files").click();
 $("files").onchange = (event) => {
   accept([...event.target.files]);
   event.target.value = ""; // Selecting the same file again must still fire change.
+};
+$("update-file").onchange = (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  if (!/\.(nsp|xci)$/i.test(file.name) || !file.size) {
+    status("Choose a nonempty .nsp or .xci update file.", "error");
+    return;
+  }
+  reset();
+  selected.update = file;
+  render();
+  status(ready());
 };
 const fileDrag = (event) => [...(event.dataTransfer?.types ?? [])].includes("Files");
 for (const type of ["dragover", "drop"]) window.addEventListener(type, (event) => {
@@ -130,9 +145,10 @@ $("dropzone").addEventListener("drop", (event) => {
   delete $("dropzone").dataset.dragging;
   accept([...event.dataTransfer.files]);
 });
-for (const kind of ["game", "keys"]) $(`remove-${kind}`).onclick = () => {
+for (const kind of ["game", "update", "keys"]) $(`remove-${kind}`).onclick = () => {
   reset();
   selected[kind] = undefined;
+  if (kind === "game") selected.update = undefined;
   render();
   status(ready());
   $("dropzone").focus();
@@ -147,7 +163,7 @@ $("cancel").onclick = () => {
 };
 window.addEventListener("pagehide", () => {
   reset();
-  selected.game = selected.keys = undefined;
+  selected.game = selected.update = selected.keys = undefined;
   clearSigning();
   $("files").value = "";
   render();
@@ -167,6 +183,7 @@ $("form").onsubmit = async (event) => {
   clearOutput();
   const current = ++generation;
   const game = selected.game;
+  const update = selected.update;
   let keysFile = selected.keys;
   let identityFile = $("signing-enabled").checked ? $("identity").files[0] : undefined;
   let provisionFile = $("signing-enabled").checked ? $("provision").files[0] : undefined;
@@ -197,7 +214,7 @@ $("form").onsubmit = async (event) => {
       signal.throwIfAborted();
       identityFile = provisionFile = undefined;
     }
-    const result = await createIpa({ [kind]: game, keys, ...(signing ? { signing } : {}) }, {
+    const result = await createIpa({ [kind]: game, ...(update ? { update } : {}), keys, ...(signing ? { signing } : {}) }, {
       signal,
       onProgress(stage) {
         if (current !== generation) return;

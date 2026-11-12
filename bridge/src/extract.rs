@@ -46,10 +46,10 @@ fn program_id(npdm: &[u8]) -> Result<u64, String> {
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "nx2ipa")]
 unsafe extern "C" {
-    fn read(offset: u64, destination: *mut u8, length: usize) -> i32;
+    fn read(source: u32, offset: u64, destination: *mut u8, length: usize) -> i32;
 }
 #[cfg(target_arch = "wasm32")]
-struct InputStorage(u64);
+struct InputStorage(u64, u32);
 #[cfg(target_arch = "wasm32")]
 impl Storage for InputStorage {
     fn size(&self) -> u64 {
@@ -64,7 +64,7 @@ impl Storage for InputStorage {
                 "input read outside container",
             ));
         }
-        if unsafe { read(offset, output.as_mut_ptr(), output.len()) } != 0 {
+        if unsafe { read(self.1, offset, output.as_mut_ptr(), output.len()) } != 0 {
             return Err(nxb_extract::ExtractError::format(
                 "could not read local container",
             ));
@@ -87,28 +87,41 @@ impl Storage for InputStorage {
     }
 }
 
-pub fn extract(input: &Value) -> Result<Value, String> {
-    let raw: Arc<dyn Storage> = if let Some(size) = input.get("sourceSize").and_then(Value::as_i64)
-    {
+fn input_storage(
+    input: &Value,
+    size_key: &str,
+    data_key: &str,
+    index: u32,
+) -> Result<Arc<dyn Storage>, String> {
+    if let Some(size) = input.get(size_key).and_then(Value::as_i64) {
         if size <= 0 || size > (1i64 << 53) - 1 {
             return Err("invalid container size".into());
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Arc::new(InputStorage(size as u64))
+            Ok(Arc::new(InputStorage(size as u64, index)))
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return Err("external container reads require WASM".into());
+            let _ = index;
+            Err("external container reads require WASM".into())
         }
     } else {
-        Arc::new(MemStorage(bytes(
-            input
-                .get("nsp")
-                .or_else(|| input.get("xci"))
-                .ok_or("missing container")?,
-        )?))
+        Ok(Arc::new(MemStorage(bytes(field(input, data_key)?)?)))
+    }
+}
+
+pub fn extract(input: &Value) -> Result<Value, String> {
+    let base_key = if input.get("nsp").is_some() {
+        "nsp"
+    } else {
+        "xci"
     };
+    let mut sources = vec![input_storage(input, "sourceSize", base_key, 0)?];
+    let separate_update = input.get("updateSize").is_some() || input.get("update").is_some();
+    if separate_update {
+        sources.push(input_storage(input, "updateSize", "update", 1)?);
+    }
     let mut key_bytes = bytes(field(input, "keys")?)?;
     let keys_text =
         std::str::from_utf8(&key_bytes).map_err(|_| "keys must be UTF-8 prod.keys bytes")?;
@@ -117,63 +130,115 @@ pub fn extract(input: &Value) -> Result<Value, String> {
     if keys.header_key().is_none() {
         return Err("prod.keys has no valid header_key".into());
     }
-    let is_xci = raw.size() >= 0x138 && raw.read_vec(0x100, 4).map_err(err)? == b"HEAD";
-    let (raw, entries) = if is_xci {
-        let secure = xci_secure(&raw, "XCI").map_err(err)?;
-        let entries = read_hfs0(secure.as_ref()).map_err(err)?;
-        (secure, entries)
-    } else {
-        let entries = read_pfs0(raw.as_ref()).map_err(err)?;
-        (raw, entries)
-    };
-    let mut names = BTreeSet::new();
-    for e in &entries {
-        let name = e.name.to_ascii_lowercase();
-        if !names.insert(name.clone()) {
-            return Err("duplicate container member".into());
+    let mut containers = Vec::new();
+    let mut base_is_xci = false;
+    for (index, raw) in sources.into_iter().enumerate() {
+        let is_xci = raw.size() >= 0x138 && raw.read_vec(0x100, 4).map_err(err)? == b"HEAD";
+        if index == 0 {
+            base_is_xci = is_xci;
         }
-        if name.ends_with(".ncz") {
-            return Err("compressed NCZ is not supported".into());
-        }
-        if name.ends_with(".tik") {
-            let ticket = raw
-                .read_vec(e.offset, 0x2c0.min(usize::try_from(e.size).map_err(err)?))
-                .map_err(err)?;
-            if ticket.len() < 0x2c0 || ticket[..4] != [4, 0, 1, 0] || ticket[0x281] != 0 {
-                return Err("only common RSA-2048/SHA-256 tickets are supported".into());
+        let (raw, entries) = if is_xci {
+            let secure = xci_secure(&raw, "XCI").map_err(err)?;
+            let entries = read_hfs0(secure.as_ref()).map_err(err)?;
+            (secure, entries)
+        } else {
+            let entries = read_pfs0(raw.as_ref()).map_err(err)?;
+            (raw, entries)
+        };
+        let mut names = BTreeSet::new();
+        for e in &entries {
+            let name = e.name.to_ascii_lowercase();
+            if !names.insert(name.clone()) {
+                return Err("duplicate container member".into());
             }
-            keys.add_title_key(
-                ticket[0x2a0..0x2b0].try_into().unwrap(),
-                ticket[0x180..0x190].try_into().unwrap(),
+            if name.ends_with(".ncz") {
+                return Err("compressed NCZ is not supported".into());
+            }
+            if name.ends_with(".tik") {
+                let ticket = raw
+                    .read_vec(e.offset, 0x2c0.min(usize::try_from(e.size).map_err(err)?))
+                    .map_err(err)?;
+                if ticket.len() < 0x2c0 || ticket[..4] != [4, 0, 1, 0] || ticket[0x281] != 0 {
+                    return Err("only common RSA-2048/SHA-256 tickets are supported".into());
+                }
+                keys.add_title_key(
+                    ticket[0x2a0..0x2b0].try_into().unwrap(),
+                    ticket[0x180..0x190].try_into().unwrap(),
+                );
+            }
+        }
+        containers.push((raw, entries));
+    }
+    let mut ncas: Vec<Nca> = Vec::new();
+    let cache = Arc::new(BlockCache::new(16));
+    for (source_index, (raw, entries)) in containers.into_iter().enumerate() {
+        let mut metadata_count = 0;
+        let mut content_ids = BTreeSet::new();
+        for e in &entries {
+            let name = e.name.to_ascii_lowercase();
+            if name.ends_with(".nca") {
+                let id = name.split('.').next().unwrap_or("");
+                if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err("NCA filenames must retain their 32-digit content IDs".into());
+                }
+                if !content_ids.insert(id.to_owned()) {
+                    return Err("duplicate NCA content ID".into());
+                }
+                let storage =
+                    Arc::new(SubStorage::new(raw.clone(), e.offset, e.size).map_err(err)?);
+                // Packages may repeat unchanged Control/content NCAs. Reuse only
+                // byte-identical content, never let an update shadow a conflicting ID.
+                if let Some(existing) = ncas.iter().find(|n| n.id == id) {
+                    if separate_update && existing.content_type == ContentType::Meta {
+                        return Err("separate inputs must contain a base-only application and an update-only package".into());
+                    }
+                    if existing.raw.size() != storage.size() {
+                        return Err("conflicting NCA content ID across containers".into());
+                    }
+                    let mut offset = 0;
+                    while offset < storage.size() {
+                        let length = (storage.size() - offset).min(1024 * 1024) as usize;
+                        if existing.raw.read_vec(offset, length).map_err(err)?
+                            != storage.read_vec(offset, length).map_err(err)?
+                        {
+                            return Err("conflicting NCA content ID across containers".into());
+                        }
+                        offset += length as u64;
+                    }
+                    continue;
+                }
+                let nca = Nca::open(&keys, id.into(), storage).map_err(err)?;
+                for (_, _, fs) in nca.sections.iter().flatten() {
+                    if fs.hash_type == 2
+                        && u64::from_le_bytes(fs.raw[0x48..0x50].try_into().unwrap())
+                            > 256 * 1024 * 1024
+                    {
+                        return Err("ExeFS or metadata exceeds the 256 MiB working limit".into());
+                    }
+                }
+                if separate_update && nca.content_type == ContentType::Meta {
+                    let source_metas =
+                        meta::metas(&keys, std::slice::from_ref(&nca), &cache).map_err(err)?;
+                    let expected = if source_index == 0 {
+                        meta::APPLICATION
+                    } else {
+                        meta::PATCH
+                    };
+                    if source_metas.len() != 1 || source_metas[0].kind != expected {
+                        return Err("separate inputs must contain a base-only application and an update-only package".into());
+                    }
+                    metadata_count += 1;
+                }
+                ncas.push(nca);
+            }
+        }
+        if separate_update && metadata_count != 1 {
+            return Err(
+                "separate inputs must contain a base-only application and an update-only package"
+                    .into(),
             );
         }
     }
-    let mut ncas = Vec::new();
-    let mut content_ids = BTreeSet::new();
-    for e in &entries {
-        let name = e.name.to_ascii_lowercase();
-        if name.ends_with(".nca") {
-            let id = name.split('.').next().unwrap_or("");
-            if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err("NCA filenames must retain their 32-digit content IDs".into());
-            }
-            if !content_ids.insert(id.to_owned()) {
-                return Err("duplicate NCA content ID".into());
-            }
-            let storage = Arc::new(SubStorage::new(raw.clone(), e.offset, e.size).map_err(err)?);
-            let nca = Nca::open(&keys, id.into(), storage).map_err(err)?;
-            for (_, _, fs) in nca.sections.iter().flatten() {
-                if fs.hash_type == 2
-                    && u64::from_le_bytes(fs.raw[0x48..0x50].try_into().unwrap())
-                        > 256 * 1024 * 1024
-                {
-                    return Err("ExeFS or metadata exceeds the 256 MiB working limit".into());
-                }
-            }
-            ncas.push(nca);
-        }
-    }
-    let cache = Arc::new(BlockCache::new(16));
     let metas = meta::metas(&keys, &ncas, &cache).map_err(err)?;
     let applications: Vec<_> = metas
         .iter()
@@ -189,10 +254,13 @@ pub fn extract(input: &Value) -> Result<Value, String> {
     {
         return Err("expected one base application and at most one bundled update; update-only, DLC and multi-title containers are unsupported".into());
     }
+    if separate_update && patches.len() != 1 {
+        return Err("separate update input must supply one matching update".into());
+    }
     let app = applications[0];
     let patch = patches.first().copied();
     if patch.is_some_and(|p| p.title != app.title | 0x800 || p.version < app.version) {
-        return Err("bundled update does not match the base application".into());
+        return Err("update does not match the base application".into());
     }
     let select_program = |meta: &meta::Cnmt| -> Result<&Nca, String> {
         let programs: Vec<_> = ncas
@@ -317,7 +385,7 @@ pub fn extract(input: &Value) -> Result<Value, String> {
                 ),
                 (
                     "container".into(),
-                    Value::Str(if is_xci { "xci" } else { "nsp" }.into()),
+                    Value::Str(if base_is_xci { "xci" } else { "nsp" }.into()),
                 ),
                 (
                     "verification".into(),

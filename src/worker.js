@@ -289,19 +289,25 @@ self.onmessage = async ({ data: input }) => {
     }
     let shaderCount = 0;
     if (input.nsp || input.xci || input.modules) {
-      let source = input.nsp ?? input.xci;
-      let reader;
-      if (source instanceof Blob) {
-        if (typeof FileReaderSync === "function") reader = new FileReaderSync();
-        else {
-          if (source.size > 256 * 1024 ** 2)
-            throw new Error("This runtime buffers Blob inputs; its container limit is 256 MiB. Use a browser with FileReaderSync for larger containers");
-          source = new Uint8Array(await source.arrayBuffer());
+      const sources = [input.nsp ?? input.xci, input.update];
+      const reader = typeof FileReaderSync === "function" ? new FileReaderSync() : undefined;
+      let bufferedSize = 0;
+      for (let i = 0; i < sources.length; i++) {
+        const source = sources[i];
+        if (!source) continue;
+        if (!(source instanceof Blob) || !reader) {
+          bufferedSize += source instanceof Blob ? source.size : source.length;
+          if (bufferedSize > 256 * 1024 ** 2)
+            throw new Error("This runtime buffers container inputs; their combined limit is 256 MiB. Use a browser with FileReaderSync for larger containers");
         }
       }
+      for (let i = 0; i < sources.length; i++)
+        if (sources[i] instanceof Blob && !reader)
+          sources[i] = new Uint8Array(await sources[i].arrayBuffer());
       let wasm, instance;
       ({ instance } = await WebAssembly.instantiate(decode(bridgeWasm), {
-        nx2ipa: { read(offset, destination, length) {
+        nx2ipa: { read(sourceIndex, offset, destination, length) {
+          const source = sources[sourceIndex];
           const start = Number(offset), end = start + length;
           const size = source instanceof Blob ? source.size : source?.length;
           if (!Number.isSafeInteger(start) || start < 0 || end > size) return 1;
@@ -315,6 +321,7 @@ self.onmessage = async ({ data: input }) => {
         } },
       }));
       wasm = instance.exports;
+      if (wasm.nx2ipa_abi_version() !== 2) throw new Error("Incompatible extraction bridge; rebuild the JS and WASM together");
       const invoke = (request) => {
         const bytes = utf8.encode(JSON.stringify({ version: 1, ...request }));
         const pointer = wasm.nx2ipa_alloc(bytes.length);
@@ -337,11 +344,12 @@ self.onmessage = async ({ data: input }) => {
         npdm = input.npdm,
         resources = input.resources;
       directory(files, directories, "nxkit/romfs");
-      if (source) {
+      if (sources[0]) {
         progress("extract");
         const extracted = invoke({
           op: "extract",
-          sourceSize: source instanceof Blob ? source.size : source.length,
+          sourceSize: sources[0] instanceof Blob ? sources[0].size : sources[0].length,
+          ...(sources[1] ? { updateSize: sources[1] instanceof Blob ? sources[1].size : sources[1].length } : {}),
           keys: encode(input.keys),
         });
         input.profile ??= {};
@@ -371,7 +379,8 @@ self.onmessage = async ({ data: input }) => {
           ...resources,
         ];
         input.keys.fill(0);
-        source = input.nsp = input.xci = undefined;
+        sources.fill(undefined);
+        input.nsp = input.xci = input.update = undefined;
       }
       if (!input.profile.modules) input.profile.modules = inferModules(modules);
       progress("build");

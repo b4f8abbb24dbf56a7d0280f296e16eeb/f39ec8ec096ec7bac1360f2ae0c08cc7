@@ -74,7 +74,7 @@ try {
   assert.match(await page.locator("#experimental-notice").textContent(), /real gameplay have not been verified/);
   assert.match(await page.locator("#experimental-notice").textContent(), /valid Apple signing identity/);
   assert.equal(await page.locator("#build-kind").textContent(), "Experimental");
-  assert.equal(await page.locator("input[type=file]").count(), 3);
+  assert.equal(await page.locator("input[type=file]").count(), 4);
   assert.equal(await page.locator("#template,#profile,#shaders").count(), 0);
   assert.equal(await page.locator("#build").isDisabled(), true);
   const chooser = page.waitForEvent("filechooser");
@@ -94,12 +94,16 @@ try {
   await drop([["empty.xci", ""]]);
   assert.match(await page.locator("#status").textContent(), /empty/);
 
+  await page.locator("#update-file").setInputFiles({ name: "Update.nsp", mimeType: "application/octet-stream", buffer: Buffer.from("update") });
+  assert.equal(await page.locator("#update-name").textContent(), "Update.nsp");
+  assert.equal(await page.locator("#update-file").inputValue(), "");
   await page.locator("#build").click();
   await calls(1);
   await page.locator("#form").dispatchEvent("submit");
   assert.equal(await page.evaluate(() => conversions.length), 1);
   assert.equal(await page.evaluate(() => conversions[0].request.nsp instanceof File), true);
-  assert.deepEqual(await page.evaluate(() => Object.keys(conversions[0].request).sort()), ["keys", "nsp"]);
+  assert.deepEqual(await page.evaluate(() => Object.keys(conversions[0].request).sort()), ["keys", "nsp", "update"]);
+  assert.equal(await page.evaluate(() => conversions[0].request.update instanceof File), true);
   assert.equal(await page.locator("#progress").isVisible(), true);
   await page.evaluate(() => conversions[0].options.onProgress("extract"));
   assert.match(await page.locator("#status").textContent(), /Extracting/);
@@ -119,6 +123,7 @@ try {
   await drop([["Example.xci", "another-game"], ["prod.keys", "test-only"]]);
   assert.equal(await page.locator("#download").isVisible(), false);
   assert.equal(await page.evaluate((url) => revoked.includes(url), output), true);
+  assert.equal(await page.locator("#update-name").textContent(), "No update selected");
 
   await page.locator("#build").click();
   await calls(2);
